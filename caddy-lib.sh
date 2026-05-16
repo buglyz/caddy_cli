@@ -362,10 +362,15 @@ render_caddyfile_to() {
         echo
 
         local have_global=0
+        local hook_global
+        hook_global="$(_hook_render_global_options)"
         if [[ -n "${EMAIL:-}" ]]; then
             have_global=1
         fi
         if compgen -G "$GLOBALS_DIR/*.inc" >/dev/null 2>&1; then
+            have_global=1
+        fi
+        if [[ -n "$hook_global" ]]; then
             have_global=1
         fi
 
@@ -374,7 +379,9 @@ render_caddyfile_to() {
             if [[ -n "${EMAIL:-}" ]]; then
                 echo "    email ${EMAIL}"
             fi
-            _hook_render_global_options
+            if [[ -n "$hook_global" ]]; then
+                echo "$hook_global"
+            fi
 
             shopt -s nullglob
             local gfiles=("$GLOBALS_DIR"/*.inc)

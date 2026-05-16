@@ -116,7 +116,6 @@ _hook_list_extra() {
 
 validate_cloudflare_token() {
     local token="$1"
-    local verify_response
 
     [[ -n "$token" ]] || return 1
     [[ "$token" != *$'\r'* ]] || return 1
@@ -127,29 +126,7 @@ validate_cloudflare_token() {
         return 1
     fi
 
-    verify_response="$(curl -fsS --retry 2 --retry-delay 1 \
-        -H "Authorization: Bearer $token" \
-        -H "Content-Type: application/json" \
-        "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || true)"
-    [[ -n "$verify_response" ]] || return 1
-
-    if ! CF_JSON="$verify_response" python3 - <<'PY' >/dev/null 2>&1
-import json, os, re
-try:
-    data = json.loads(os.environ["CF_JSON"])
-except Exception:
-    raise SystemExit(1)
-if not data.get("success"):
-    raise SystemExit(1)
-text = json.dumps(data, ensure_ascii=False)
-if not re.search(r'DNS.*(Edit|Write)|(Edit|Write).*DNS', text, re.I):
-    raise SystemExit(1)
-PY
-    then
-        return 1
-    fi
-
-    return 0
+    cloudflare_token_can_use_dns "$token"
 }
 
 cloudflare_env_configured() {
@@ -332,7 +309,6 @@ cloudflare_dns_ready() {
     local token domains_ok=0 domain
 
     token="$(cloudflare_env_token_value)" || return 1
-    validate_cloudflare_token "$token" || return 1
 
     if ! cloudflare_token_can_use_dns "$token"; then
         return 1
@@ -367,11 +343,11 @@ cmd_cloudflare() {
     local token_value
 
     case "$token" in
-        ""|status|show)
+        ""|status|show|check)
             if [[ -f "$CLOUDFLARE_ENV_FILE" ]]; then
                 say "Cloudflare Token: 已设置"
                 token_value="$(cloudflare_env_token_value 2>/dev/null || true)"
-                if [[ -n "$token_value" ]] && validate_cloudflare_token "$token_value" && cloudflare_token_can_use_dns "$token_value"; then
+                if [[ -n "$token_value" ]] && validate_cloudflare_token "$token_value"; then
                     say "Cloudflare Token 权限: 有效"
                 else
                     say "Cloudflare Token 权限: 无效或不足"
@@ -391,13 +367,6 @@ cmd_cloudflare() {
             action="clear"
             ;;
     esac
-
-    if [[ "$action" == "set" && -z "$token" ]]; then
-        read -rp "请输入 Cloudflare API Token（回车清空）: " token
-        if [[ -z "$token" ]]; then
-            action="clear"
-        fi
-    fi
 
     if [[ "$action" == "set" ]]; then
         if ! validate_cloudflare_token "$token"; then
@@ -439,7 +408,7 @@ cmd_cloudflare() {
         if (( had_dropin )); then
             cp -a "$dropin_bak" "$CLOUDFLARE_SERVICE_DROPIN"
         else
-            ensure_cloudflare_service_dropin
+            rm -f "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
         fi
         fix_permissions
         if service_ready; then
