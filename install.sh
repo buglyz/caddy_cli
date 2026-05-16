@@ -116,8 +116,8 @@ init_layout_and_permissions() {
     fi
 
     chmod 755 /etc/caddy /etc/caddy/sites.d /etc/caddy/globals.d /etc/caddy/backup /var/log/caddy || true
-    find /etc/caddy/sites.d -type f -name '*.conf' -exec chmod 644 {} \; 2>/dev/null || true
-    find /etc/caddy/globals.d -type f -name '*.inc' -exec chmod 644 {} \; 2>/dev/null || true
+    find /etc/caddy/sites.d -type f -name '*.conf' -exec chmod 644 {} + 2>/dev/null || true
+    find /etc/caddy/globals.d -type f -name '*.inc' -exec chmod 644 {} + 2>/dev/null || true
 }
 
 enable_and_restart_service() {
@@ -135,7 +135,6 @@ main() {
     require_root
     require_command apt-get
     require_command curl
-    require_command bash
 
     log "Starting Caddy CLI installer..."
     install_dependencies

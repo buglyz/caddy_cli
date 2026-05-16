@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Clean up on exit: remove validate log + release lock if held
-trap 'cleanup_paths "${LAST_VALIDATE_LOG:-}"; [[ -n "${_LOCK_FD:-}" ]] && { flock -u "$_LOCK_FD" 2>/dev/null || true; exec {_LOCK_FD}>&- || true; }' EXIT
+# Clean up on exit
+trap 'cleanup_paths "${LAST_VALIDATE_LOG:-}"' EXIT
 
 CADDYFILE="/etc/caddy/Caddyfile"
 SITES_DIR="/etc/caddy/sites.d"
@@ -43,6 +43,10 @@ say() {
 
 fail() {
     echo "错误: $*" >&2
+}
+
+log_ok() {
+    echo -e "$*"
 }
 
 trim() {
@@ -746,12 +750,12 @@ check_local_upstreams_health() {
         rc=0
         is_tcp_port_listening "$port" || rc=$?
         if (( rc == 0 )); then
-            say "[OK] 127.0.0.1:$port 正在监听"
+            say "[OK] localhost:$port 正在监听"
         elif (( rc == 2 )); then
             say "[WARN] 无法检查端口 $port（缺少 ss/netstat）"
             ((unknown++))
         else
-            say "[WARN] 127.0.0.1:$port 未监听"
+            say "[WARN] localhost:$port 未监听"
             ((missing++))
         fi
     done
@@ -995,7 +999,6 @@ write_site_file() {
     local file="$1"
     local label="$2"
     local content="$3"
-    local oldbak_name="$4"
 
     [[ -n "$file" && -n "$content" ]] || {
         fail "write_site_file: file or content empty"
@@ -1013,7 +1016,6 @@ write_site_file() {
         return 1
     fi
 
-    show_site_block "$file" 2>/dev/null || true
     log_ok "站点 \e[1;36m${label}\e[0m 已写入并生效"
     return 0
 }
@@ -1063,7 +1065,7 @@ cmd_add_emby() {
         target_domain="https://${target_domain}"
     fi
 
-    local sanitized old_file new_file file oldbak site_block
+    local sanitized old_file new_file file site_block
     sanitized="$(sanitize_name "$label")"
     new_file="${SITES_DIR}/${sanitized}.conf"
     old_file="${SITES_DIR}/${sanitized}.conf.disabled"
@@ -1077,9 +1079,8 @@ cmd_add_emby() {
     done
 
     site_block="$(build_emby_site_block "$label" "$target_domain" "$scheme")"
-    oldbak=""
     ensure_dirs
-    write_site_file "$new_file" "$label" "$site_block" oldbak
+    write_site_file "$new_file" "$label" "$site_block"
     fix_permissions
     if [[ "$scheme" == "http" ]]; then
         say "已添加 Emby 反代站点（HTTP，不申请证书）: $label -> $target_domain"
@@ -1279,7 +1280,7 @@ cmd_set_emby() {
     local site_block
     site_block="$(build_emby_site_block "$label" "$new_target" "$scheme")"
 
-    write_site_file "$file" "$label" "$site_block" oldbak
+    write_site_file "$file" "$label" "$site_block"
     fix_permissions
 }
 
