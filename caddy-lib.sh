@@ -482,10 +482,17 @@ _svc_with_timeout() {
     esac
 }
 
-svc_reload()  { _svc_with_timeout reload; }
-svc_restart() { _svc_with_timeout restart; }
-svc_start()   { _svc_with_timeout start; }
-svc_stop()    { _svc_with_timeout stop; }
+svc_reload()     { _svc_with_timeout reload; }
+svc_restart()    { _svc_with_timeout restart; }
+svc_start()      { _svc_with_timeout start; }
+svc_stop()       { _svc_with_timeout stop; }
+svc_daemon_reload() {
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl daemon-reload >/dev/null 2>&1 || true ;;
+        openrc)  : ;;  # OpenRC has no daemon-reload equivalent
+    esac
+}
 
 svc_enable() {
     detect_svc_backend
@@ -656,27 +663,6 @@ run_mutation() {
         say "已保存回滚快照: $(basename "$snapshot_path")"
     fi
     return "$rc"
-}
-
-run_systemctl_with_timeout() {
-    local timeout_seconds action rc
-    timeout_seconds="$(get_systemctl_timeout_seconds)"
-    action="${1:-systemctl}"
-
-    if command_exists timeout; then
-        if timeout --foreground "${timeout_seconds}s" systemctl "$@"; then
-            return 0
-        fi
-        rc=$?
-        if (( rc == 124 )); then
-            fail "systemctl $action 超时（${timeout_seconds}s）"
-        else
-            fail "systemctl $action 执行失败"
-        fi
-        return "$rc"
-    fi
-
-    systemctl "$@"
 }
 
 is_local_upstream_host() {
@@ -998,6 +984,33 @@ ${site_label} {
 EMBYEOF
 }
 
+write_site_file() {
+    local file="$1"
+    local label="$2"
+    local content="$3"
+    local oldbak_name="$4"
+
+    [[ -n "$file" && -n "$content" ]] || {
+        fail "write_site_file: file or content empty"
+        return 1
+    }
+
+    printf '%s
+' "$content" > "$file"
+    chmod 644 "$file"
+    chown root:caddy "$file" 2>/dev/null || true
+
+    if ! apply_config; then
+        rm -f "$file"
+        fail "Caddy 配置重载失败，临时文件已删除"
+        return 1
+    fi
+
+    show_site_block "$file" 2>/dev/null || true
+    log_ok "站点 \e[1;36m${label}\e[0m 已写入并生效"
+    return 0
+}
+
 cmd_add_emby() {
     local label="${1:-}"
     local target_domain=""
@@ -1192,6 +1205,75 @@ cmd_add_static() {
     if [[ ! -d "$site_dir" ]]; then
         say "注意: 当前目录不存在，后续创建后即可由 Caddy 提供访问。"
     fi
+}
+
+cmd_set_emby() {
+    local file="$1"
+    local site_type="$2"
+    local label="$3"
+    local query="$4"
+    local override_emby_target="$5"
+
+    # Extract current target from file
+    local current_target scheme label_from_file
+    current_target="$(sed -n 's/^[[:space:]]*reverse_proxy[[:space:]]\+//p' "$file" | head -n 1)"
+    current_target="$(trim "$current_target")"
+
+    if [[ -z "$current_target" ]]; then
+        fail "无法解析 Emby 反代目标: $file"
+        return 1
+    fi
+
+    # Detect scheme from site label: domain only = https, http://domain = http
+    label_from_file="$(sed -n '1s/^[[:space:]]\{0,\}\(.\{1,\}\)[[:space:]]\{0,\}{//p' "$file")"
+    label_from_file="$(trim "$label_from_file")"
+    if [[ "$label_from_file" == http://* ]]; then
+        scheme="http"
+        label="${label_from_file#http://}"
+    else
+        scheme="https"
+        label="$label_from_file"
+    fi
+
+    if [[ -z "$label" ]]; then
+        fail "无法解析站点标签: $file"
+        return 1
+    fi
+
+    say "当前 Emby 反代: ${label} → ${current_target}"
+
+    local new_target=""
+    if [[ -n "$override_emby_target" ]]; then
+        new_target="$override_emby_target"
+        say "使用指定目标: $new_target"
+    else
+        read -rp "输入新的 Emby 目标地址 (格式 example.com 或 1.2.3.4:8096): " new_target
+        new_target="$(trim "$new_target")"
+    fi
+
+    if [[ -z "$new_target" ]]; then
+        say "未提供新目标，已取消。"
+        return 0
+    fi
+
+    # 构建完整 URL：自动补 http/https 和默认端口 8096
+    if [[ "$new_target" != *://* ]]; then
+        # 纯 IP:port 或 domain:port
+        if [[ "$new_target" == *:* ]]; then
+            new_target="${scheme}://${new_target}"
+        else
+            new_target="${scheme}://${new_target}:8096"
+        fi
+    fi
+
+    say "新目标: ${label} → ${new_target}"
+    say "当前协议: ${scheme}，如需切换请在 cmd_set 调用时使用 --http / --https"
+
+    local site_block
+    site_block="$(build_emby_site_block "$label" "$new_target" "$scheme")"
+
+    write_site_file "$file" "$label" "$site_block" oldbak
+    fix_permissions
 }
 
 cmd_set() {
@@ -2127,8 +2209,9 @@ cmd_show_help() {
   c start
   c restart
   c stop
-  c
+  c menu
 
+（别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby）
 示例:
   c add example.com 3000
   c add example.com 3000 --path /api

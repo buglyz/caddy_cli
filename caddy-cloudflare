@@ -127,7 +127,6 @@ validate_cloudflare_token() {
         return 1
     fi
 
-    # FIXED: was using literal "***" instead of "$token"
     verify_response="$(curl -fsS --retry 2 --retry-delay 1 \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
@@ -224,7 +223,6 @@ cloudflare_domain_candidates() {
 cloudflare_api_get() {
     local token="$1"
     local url="$2"
-    # FIXED: was using literal "***" instead of "$token"
     curl -fsS --retry 2 --retry-delay 1 \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
@@ -276,13 +274,12 @@ cloudflare_domain_accessible_with_token() {
     while IFS= read -r candidate || [[ -n "$candidate" ]]; do
         candidate="$(trim "$candidate")"
         [[ -n "$candidate" ]] || continue
-        # FIXED: was using literal "***" instead of "$token"
         resp="$(curl -fsS --retry 2 --retry-delay 1 \
             -G "https://api.cloudflare.com/client/v4/zones" \
             --data-urlencode "name=$candidate" \
             --data-urlencode "status=active" \
             --data-urlencode "per_page=1" \
-        -H "Authorization: Bearer $token" \
+            -H "Authorization: Bearer $token" \
             -H "Content-Type: application/json" 2>/dev/null || true)"
         [[ -n "$resp" ]] || continue
         if CF_JSON="$resp" python3 - <<'PY' >/dev/null 2>&1
@@ -430,7 +427,7 @@ cmd_cloudflare() {
     fi
 
     if service_ready; then
-        systemctl daemon-reload >/dev/null 2>&1 || true
+        svc_daemon_reload
     fi
 
     if ! apply_config; then
@@ -446,7 +443,7 @@ cmd_cloudflare() {
         fi
         fix_permissions
         if service_ready; then
-            systemctl daemon-reload >/dev/null 2>&1 || true
+            svc_daemon_reload
         fi
         cleanup_paths "$env_bak" "$dropin_bak"
         fail "已回滚 Cloudflare 设置"
@@ -454,7 +451,7 @@ cmd_cloudflare() {
     fi
 
     if service_ready; then
-        run_systemctl_with_timeout restart caddy
+        svc_restart
     fi
 
     cleanup_paths "$env_bak" "$dropin_bak"
