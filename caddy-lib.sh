@@ -439,8 +439,82 @@ restore_live_caddyfile() {
 }
 
 service_ready() {
-    command_exists systemctl
+    command_exists systemctl || command_exists rc-service
 }
+
+# ── 服务抽象层（systemd / OpenRC） ──
+
+detect_svc_backend() {
+    if [[ -n "${SVC_BACKEND:-}" ]]; then
+        return 0
+    fi
+    if command_exists systemctl; then
+        SVC_BACKEND="systemd"
+    elif command_exists rc-service; then
+        SVC_BACKEND="openrc"
+    else
+        SVC_BACKEND=""
+    fi
+}
+
+svc_is_active() {
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl is-active --quiet caddy 2>/dev/null ;;
+        openrc)  rc-service -q caddy status >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+_svc_with_timeout() {
+    local cmd="$1"; shift
+    if [[ "$SVC_BACKEND" == "systemd" ]] && command_exists timeout; then
+        local to=$(get_systemctl_timeout_seconds) rc
+        if timeout --foreground "${to}s" systemctl "$cmd" caddy "$@"; then return 0; fi
+        rc=$?
+        (( rc == 124 )) && fail "systemctl $cmd 超时（${to}s）" || fail "systemctl $cmd 执行失败"
+        return "$rc"
+    fi
+    case "$SVC_BACKEND" in
+        systemd) systemctl "$cmd" caddy "$@" ;;
+        openrc)  rc-service caddy "$cmd" ;;
+        *) fail "未检测到 service manager"; return 1 ;;
+    esac
+}
+
+svc_reload()  { _svc_with_timeout reload; }
+svc_restart() { _svc_with_timeout restart; }
+svc_start()   { _svc_with_timeout start; }
+svc_stop()    { _svc_with_timeout stop; }
+
+svc_enable() {
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl enable caddy >/dev/null 2>&1 || true ;;
+        openrc)  rc-update add caddy default >/dev/null 2>&1 || true ;;
+    esac
+}
+
+svc_status_show() {
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl status caddy --no-pager ;;
+        openrc)  rc-service caddy status ;;
+        *) fail "未检测到 service manager"; return 1 ;;
+    esac
+}
+
+svc_unit_exists() {
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl list-unit-files caddy.service >/dev/null 2>&1 ;;
+        openrc)  [[ -f /etc/init.d/caddy ]] ;;
+        *) return 1 ;;
+    esac
+}
+
+svc_backend_name() { detect_svc_backend; echo "${SVC_BACKEND:-无}"; }
+
 
 with_global_lock() {
     local wait_seconds fd rc
@@ -702,20 +776,20 @@ check_local_upstreams_health() {
 
 reload_or_start_caddy() {
     if ! service_ready; then
-        say "未检测到 systemctl，配置已写入 $CADDYFILE，请手动重载 Caddy。"
+        say "未检测到 service manager（systemd/OpenRC），配置已写入 $CADDYFILE，请手动重载 Caddy。"
         return 0
     fi
 
-    if systemctl is-active --quiet caddy; then
+    if svc_is_active; then
         say "正在重载 Caddy 服务..."
-        if ! run_systemctl_with_timeout reload caddy; then
+        if ! svc_reload; then
             say "reload 失败，降级为 restart..."
-            run_systemctl_with_timeout restart caddy
+            svc_restart
         fi
         say "已重载 Caddy"
     else
         say "Caddy 未运行，正在启动..."
-        run_systemctl_with_timeout start caddy
+        svc_start
         say "Caddy 未运行，已自动启动"
     fi
 }
@@ -756,7 +830,7 @@ apply_config() {
         fail "Caddy 重载或启动失败，正在尝试回滚。"
         restore_live_caddyfile "$bak" "$had_old"
         if service_ready; then
-            run_systemctl_with_timeout restart caddy || true
+            svc_restart || true
         fi
         cleanup_paths "$bak"
         return 1
@@ -1402,7 +1476,7 @@ cmd_timeout() {
     effective_timeout="$(get_systemctl_timeout_seconds)"
 
     if [[ -z "$new_timeout" ]]; then
-        say "当前 systemctl 超时: ${effective_timeout}s（持久配置: ${SYSTEMCTL_TIMEOUT_SECONDS}s）"
+        say "当前服务超时: ${effective_timeout}s（持久配置: ${SYSTEMCTL_TIMEOUT_SECONDS}s）"
         if [[ -n "${CADDYCTL_SYSTEMCTL_TIMEOUT:-}" ]]; then
             say "当前会话由环境变量 CADDYCTL_SYSTEMCTL_TIMEOUT 覆盖。"
         fi
@@ -1420,7 +1494,7 @@ cmd_timeout() {
 
     SYSTEMCTL_TIMEOUT_SECONDS="$new_timeout"
     save_state
-    say "已设置 systemctl 超时: ${SYSTEMCTL_TIMEOUT_SECONDS}s"
+    say "已设置服务超时: ${SYSTEMCTL_TIMEOUT_SECONDS}s"
 }
 
 cmd_upstream_mode() {
@@ -1481,28 +1555,36 @@ cmd_config() {
 }
 
 cmd_status() {
-    require_command systemctl
-    systemctl status caddy --no-pager
+    service_ready || { fail "未检测到 service manager"; return 1; }
+    svc_status_show
 }
 
 cmd_logs() {
-    require_command journalctl
-    journalctl -u caddy -n 120 --no-pager
+    if command_exists journalctl && journalctl -u caddy -n 1 --no-pager >/dev/null 2>&1; then
+        journalctl -u caddy -n 120 --no-pager
+    elif [[ -f /var/log/caddy.log ]]; then
+        tail -n 120 /var/log/caddy.log
+    elif [[ -f /var/log/caddy/caddy.log ]]; then
+        tail -n 120 /var/log/caddy/caddy.log
+    else
+        fail "未检测到 Caddy 日志（无 journalctl，/var/log/caddy.log 不存在）"
+        return 1
+    fi
 }
 
 cmd_start() {
-    require_command systemctl
-    run_systemctl_with_timeout start caddy
+    service_ready || { fail "未检测到 service manager"; return 1; }
+    svc_start
 }
 
 cmd_restart() {
-    require_command systemctl
-    run_systemctl_with_timeout restart caddy
+    service_ready || { fail "未检测到 service manager"; return 1; }
+    svc_restart
 }
 
 cmd_stop() {
-    require_command systemctl
-    run_systemctl_with_timeout stop caddy
+    service_ready || { fail "未检测到 service manager"; return 1; }
+    svc_stop
 }
 
 cmd_disable() {
@@ -1722,21 +1804,21 @@ cmd_doctor() {
     fi
 
     if service_ready; then
-        if systemctl list-unit-files caddy.service >/dev/null 2>&1; then
-            echo "[OK] 检测到 caddy.service"
+        echo "[OK] 检测到 service manager: $(svc_backend_name)"
+        if svc_unit_exists; then
+            echo "[OK] 检测到 caddy 服务单元"
         else
-            echo "[WARN] 未检测到 caddy.service"
+            echo "[WARN] 未检测到 caddy 服务单元"
         fi
 
-        if systemctl is-active --quiet caddy; then
+        if svc_is_active; then
             echo "[OK] Caddy 正在运行"
         else
             echo "[WARN] Caddy 未运行"
         fi
     else
-        echo "[WARN] 未检测到 systemctl"
+        echo "[WARN] 未检测到 service manager（systemd/OpenRC）"
     fi
-    echo "[INFO] systemctl 超时: $(get_systemctl_timeout_seconds)s（持久配置: ${SYSTEMCTL_TIMEOUT_SECONDS}s）"
     echo "[INFO] 操作锁等待: $(get_lock_wait_seconds)s（可用环境变量 CADDYCTL_LOCK_WAIT_SECONDS 覆盖）"
     echo "[INFO] 上游健康检查模式: $(get_upstream_check_mode)"
     _hook_cmd_doctor
@@ -1858,6 +1940,18 @@ install_caddy_via_pacman() {
     pacman -Sy --noconfirm caddy
 }
 
+install_caddy_via_apk() {
+    if ! grep -q '^[^#]*community' /etc/apk/repositories 2>/dev/null; then
+        local ver
+        ver=$(cut -d. -f1,2 /etc/alpine-release 2>/dev/null || echo "3.21")
+        say "启用 Alpine community 仓库..."
+        echo "https://dl-cdn.alpinelinux.org/alpine/v${ver}/community" >> /etc/apk/repositories
+    fi
+    apk update
+    apk add caddy
+}
+
+
 cmd_install() {
     if command_exists caddy; then
         say "检测到 caddy 已安装: $(caddy version 2>/dev/null || echo unknown)"
@@ -1870,6 +1964,9 @@ cmd_install() {
     elif command_exists pacman; then
         say "检测到 pacman，按发行版仓库安装 Caddy。"
         install_caddy_via_pacman
+    elif command_exists apk; then
+        say "检测到 apk（Alpine），安装 Caddy..."
+        install_caddy_via_apk
     else
         fail "当前系统未适配自动安装，请按 https://caddyserver.com/docs/install 手动安装"
         return 1
@@ -1885,11 +1982,11 @@ cmd_install() {
     fi
 
     if service_ready; then
-        systemctl enable caddy >/dev/null 2>&1 || true
+        svc_enable
         if has_any_config; then
             apply_config
         else
-            run_systemctl_with_timeout start caddy || true
+            svc_start || true
         fi
     fi
 
@@ -1903,10 +2000,9 @@ cmd_show_help() {
   c install-self
   c update
   c doctor
-  c add <域名> <本地端口> [--www] [--log] [--http]
-  c add <域名> <本地端口> --path <前缀> [--www] [--log] [--http]
-  c add-static <域名> <目录> [--www] [--log] [--spa]
-  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--www|--no-www] [--log|--no-log]
+  c add <域名> <本地端口> [--http] [--path <前缀>]
+  c add-static <域名> <目录> [--spa]
+  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
   c rm <域名>
   c enable <域名>
   c disable <域名>
@@ -1928,11 +2024,11 @@ cmd_show_help() {
   c
 
 示例:
-  c add example.com 3000 --www --log
-  c add example.com 3000 --path /api --log
-  c add-static static.example.com /var/www/site --www
+  c add example.com 3000
+  c add example.com 3000 --path /api
+  c add-static static.example.com /var/www/site --spa
   c update
-  c set example.com --port 4000 --no-log
+  c set example.com --port 4000
   c timeout 45
   c upstream-mode strict
   c cert-check example.com
@@ -2160,7 +2256,7 @@ menu_config() {
     echo "4. 仅校验配置"
     echo "5. 应用配置"
     echo "6. 查看当前 Caddyfile"
-    echo "7. 设置 systemctl 超时"
+    echo "7. 设置服务超时"
     echo "8. 设置上游检查模式"
     echo "9. 回滚上一步"
     _hook_menu_config_items
