@@ -306,7 +306,7 @@ cloudflare_site_domains() {
 }
 
 cloudflare_dns_ready() {
-    local token domains_ok=0 domain
+    local token domain
 
     token="$(cloudflare_env_token_value)" || return 1
 
@@ -326,10 +326,9 @@ cloudflare_dns_ready() {
         if ! cloudflare_domain_accessible_with_token "$token" "$domain"; then
             return 1
         fi
-        ((domains_ok++))
     done
 
-    (( domains_ok > 0 ))
+    return 0
 }
 
 # ═══════════════════════════════════════

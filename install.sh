@@ -135,11 +135,11 @@ main() {
     require_root
     require_command apt-get
     require_command curl
-    require_command gpg
     require_command bash
 
     log "Starting Caddy CLI installer..."
     install_dependencies
+    require_command gpg
     install_or_keep_caddy
     install_cli
     init_layout_and_permissions

@@ -59,7 +59,7 @@ build_caddy_with_cloudflare() {
     [[ -s "$built" ]] || die "Built Caddy binary is empty"
 
     if command -v dpkg-divert >/dev/null 2>&1; then
-        dpkg-divert --package caddyctl --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
+        dpkg-divert --local --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
     fi
 
     install -m 0755 "$built" "$CADDY_BIN"
@@ -129,10 +129,10 @@ main() {
     require_command apt-get
     require_command curl
     require_command bash
-    require_command go
 
     log "Starting Caddy Cloudflare installer..."
     install_dependencies
+    require_command go
     install_xcaddy
     build_caddy_with_cloudflare
     install_cli
