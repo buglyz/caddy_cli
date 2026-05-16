@@ -984,9 +984,13 @@ write_site_file_with_rollback() {
 build_emby_site_block() {
     local label="$1"
     local target_domain="$2"
+    local scheme="$3"
+
+    local site_label="$label"
+    [[ "$scheme" == "http" ]] && site_label="http://${label}"
 
     cat <<EMBYEOF
-${label} {
+${site_label} {
     reverse_proxy ${target_domain} {
         header_up Host {upstream_hostport}
     }
@@ -996,8 +1000,10 @@ EMBYEOF
 
 cmd_add_emby() {
     local label="${1:-}"
-    local target_domain="${2:-}"
+    local target_domain=""
+    local scheme="https"
 
+    # Parse args
     if [[ -z "$label" ]]; then
         read -rp "请输入你的域名: " label
     else
@@ -1009,10 +1015,22 @@ cmd_add_emby() {
         return 1
     fi
 
+    # Parse remaining args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --http) scheme="http"; shift ;;
+            *)
+                if [[ -z "$target_domain" ]]; then
+                    target_domain="$1"; shift
+                else
+                    fail "未知参数: $1"; return 1
+                fi
+                ;;
+        esac
+    done
+
     if [[ -z "$target_domain" ]]; then
         read -rp "请输入目标 Emby 服务器地址（如 https://emby.example.com:443）: " target_domain
-    else
-        shift $(( $# > 0 ? 1 : 0 ))
     fi
     target_domain="$(trim "$target_domain")"
     if [[ -z "$target_domain" ]]; then
@@ -1038,12 +1056,16 @@ cmd_add_emby() {
         fi
     done
 
-    site_block="$(build_emby_site_block "$label" "$target_domain")"
+    site_block="$(build_emby_site_block "$label" "$target_domain" "$scheme")"
     oldbak=""
     ensure_dirs
     write_site_file "$new_file" "$label" "$site_block" oldbak
     fix_permissions
-    say "已添加 Emby 反代站点: $label -> $target_domain"
+    if [[ "$scheme" == "http" ]]; then
+        say "已添加 Emby 反代站点（HTTP，不申请证书）: $label -> $target_domain"
+    else
+        say "已添加 Emby 反代站点: $label -> $target_domain"
+    fi
     say "注意: Emby 反代不启用 gzip 压缩（避免影响流媒体传输）"
 }
 
@@ -2085,7 +2107,7 @@ cmd_show_help() {
   c doctor
   c add <域名> <本地端口> [--http] [--path <前缀>]
   c add-static <域名> <目录> [--spa]
-  c add-emby <域名> <目标地址>
+  c add-emby <域名> <目标地址> [--http]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
   c rm <域名>
   c enable <域名>
@@ -2112,6 +2134,7 @@ cmd_show_help() {
   c add example.com 3000 --path /api
   c add-static static.example.com /var/www/site --spa
   c add-emby emby.example.com https://10.0.0.5:8096
+  c add-emby lan.example.com http://10.0.0.5:8096 --http
   c update
   c set example.com --port 4000
   c set emby.example.com --target https://10.0.0.6:8096
