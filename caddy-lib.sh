@@ -1878,13 +1878,17 @@ cmd_update() {
     require_command curl
     require_command bash
 
-    local url tmp target_bin target_alias
+    local url lib_url tmp tmp_lib target_bin target_alias lib_bin
     url="${CADDYCTL_UPDATE_URL:-$DEFAULT_UPDATE_URL}"
+    lib_url="${url%/*}/caddy-lib.sh"
+
     target_bin="/usr/local/bin/caddyctl"
     target_alias="/usr/local/bin/c"
-    tmp="$(mktemp)"
+    lib_bin="/usr/local/bin/caddy-lib.sh"
 
-    say "正在下载最新脚本: $url"
+    # 1) 下载并安装前端脚本
+    tmp="$(mktemp)"
+    say "正在下载: $url"
     if ! curl -fsSL --retry 3 --retry-delay 1 "$url" -o "$tmp"; then
         cleanup_paths "$tmp"
         fail "下载失败，请检查网络或 URL。"
@@ -1900,14 +1904,35 @@ cmd_update() {
         fail "下载脚本语法校验失败，已中止更新。"
         return 1
     fi
-
     install -Dm755 "$tmp" "$target_bin"
     ln -sf "$target_bin" "$target_alias"
     cleanup_paths "$tmp"
 
+    # 2) 下载并安装共享库
+    tmp_lib="$(mktemp)"
+    say "正在下载: $lib_url"
+    if ! curl -fsSL --retry 3 --retry-delay 1 "$lib_url" -o "$tmp_lib"; then
+        cleanup_paths "$tmp_lib"
+        fail "共享库下载失败，前端已更新但库未更新，请检查网络。"
+        return 1
+    fi
+    if [[ ! -s "$tmp_lib" ]]; then
+        cleanup_paths "$tmp_lib"
+        fail "共享库下载为空，已中止。"
+        return 1
+    fi
+    if ! bash -n "$tmp_lib"; then
+        cleanup_paths "$tmp_lib"
+        fail "共享库语法校验失败，已中止。"
+        return 1
+    fi
+    install -Dm644 "$tmp_lib" "$lib_bin"
+    cleanup_paths "$tmp_lib"
+
     say "更新完成:"
     say "  $target_bin"
     say "  $target_alias -> $target_bin"
+    say "  $lib_bin"
 }
 
 install_caddy_via_apt() {
