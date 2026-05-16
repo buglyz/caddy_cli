@@ -708,7 +708,10 @@ reload_or_start_caddy() {
 
     if systemctl is-active --quiet caddy; then
         say "正在重载 Caddy 服务..."
-        run_systemctl_with_timeout reload caddy
+        if ! run_systemctl_with_timeout reload caddy; then
+            say "reload 失败，降级为 restart..."
+            run_systemctl_with_timeout restart caddy
+        fi
         say "已重载 Caddy"
     else
         say "Caddy 未运行，正在启动..."
