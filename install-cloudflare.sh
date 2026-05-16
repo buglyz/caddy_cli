@@ -2,7 +2,9 @@
 set -euo pipefail
 
 readonly CADDY_CF_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-cloudflare.sh"
+readonly LIB_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-lib.sh"
 readonly CLI_BIN="/usr/local/bin/c"
+readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
 readonly CADDY_BIN="/usr/bin/caddy"
 readonly XCADDY_BIN="/usr/local/bin/xcaddy"
 readonly CLOUDFLARE_MODULE="github.com/caddy-dns/cloudflare"
@@ -66,13 +68,24 @@ build_caddy_with_cloudflare() {
 
 install_cli() {
     log "[4/6] Installing c command..."
-    local tmp
-    tmp="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$CADDY_CF_URL" -o "$tmp"
-    [[ -s "$tmp" ]] || die "Downloaded CLI script is empty: $CADDY_CF_URL"
-    bash -n "$tmp"
-    install -m 0755 "$tmp" "$CLI_BIN"
-    rm -f "$tmp"
+
+    # Download and install shared library
+    local tmp_lib
+    tmp_lib="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
+    [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
+    bash -n "$tmp_lib"
+    install -m 0644 "$tmp_lib" "$LIB_BIN"
+    rm -f "$tmp_lib"
+
+    # Download and install Cloudflare CLI frontend
+    local tmp_cli
+    tmp_cli="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 "$CADDY_CF_URL" -o "$tmp_cli"
+    [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CADDY_CF_URL"
+    bash -n "$tmp_cli"
+    install -m 0755 "$tmp_cli" "$CLI_BIN"
+    rm -f "$tmp_cli"
 }
 
 prepare_layout() {
@@ -82,10 +95,10 @@ prepare_layout() {
     chmod 644 /etc/caddy/caddyctl.conf
 
     install -d -m 0755 /etc/systemd/system/caddy.service.d
-    cat > "$CLOUD_FILE_DROPIN" <<EOF2
+    cat > "$CLOUD_FILE_DROPIN" <<EOF
 [Service]
 EnvironmentFile=-$CLOUD_ENV_FILE
-EOF2
+EOF
     chmod 644 "$CLOUD_FILE_DROPIN"
 
     if getent group caddy >/dev/null 2>&1; then

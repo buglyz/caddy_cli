@@ -4,7 +4,9 @@ set -euo pipefail
 readonly CADDY_GPG_KEY_URL="https://dl.cloudsmith.io/public/caddy/stable/gpg.key"
 readonly CADDY_APT_LIST_URL="https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt"
 readonly CLI_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy.sh"
+readonly LIB_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-lib.sh"
 readonly CLI_BIN="/usr/local/bin/c"
+readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
 
 apt_index_updated=0
 
@@ -81,15 +83,23 @@ install_or_keep_caddy() {
 
 install_cli() {
     log "[5/7] Installing c command..."
-    local tmp
-    tmp="$(mktemp)"
+    local tmp_lib tmp_cli
 
-    curl -fsSL --retry 3 --retry-delay 1 "$CLI_URL" -o "$tmp"
-    [[ -s "$tmp" ]] || die "Downloaded CLI script is empty: $CLI_URL"
+    # Download and install shared library
+    tmp_lib="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
+    [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
+    bash -n "$tmp_lib"
+    install -m 0644 "$tmp_lib" "$LIB_BIN"
+    rm -f "$tmp_lib"
 
-    bash -n "$tmp"
-    install -m 0755 "$tmp" "$CLI_BIN"
-    rm -f "$tmp"
+    # Download and install CLI frontend
+    tmp_cli="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 "$CLI_URL" -o "$tmp_cli"
+    [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CLI_URL"
+    bash -n "$tmp_cli"
+    install -m 0755 "$tmp_cli" "$CLI_BIN"
+    rm -f "$tmp_cli"
 }
 
 init_layout_and_permissions() {
