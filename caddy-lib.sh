@@ -800,52 +800,9 @@ get_primary_label() {
     trim "$label"
 }
 
-emit_security_headers() {
-    cat <<'EOF'
-    header {
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "SAMEORIGIN"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "accelerometer=(), ambient-light-sensor=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), geolocation=(), gyroscope=(), hid=(), microphone=(), payment=(), usb=()"
-    }
-EOF
-}
-
-emit_access_log_block() {
-    local primary="$1"
-    cat <<EOF
-    log {
-        output file $ACCESS_LOG_DIR/$(sanitize_name "$primary").log {
-            roll_size $ACCESS_LOG_ROLL_SIZE
-            roll_keep $ACCESS_LOG_ROLL_KEEP
-            roll_keep_for $ACCESS_LOG_ROLL_KEEP_FOR
-        }
-        format console
-    }
-EOF
-}
-
 emit_site_common_blocks() {
-    local primary="$1"
-    local access_log="$2"
-
     cat <<'EOF'
     encode zstd gzip
-EOF
-    emit_security_headers
-    if [[ "$access_log" == "on" ]]; then
-        emit_access_log_block "$primary"
-    fi
-}
-
-emit_www_redirect_block() {
-    local primary="$1"
-    local scheme="$2"
-    cat <<EOF
-www.$primary {
-    redir ${scheme}://$primary{uri} 308
-}
-
 EOF
 }
 
@@ -853,19 +810,11 @@ build_reverse_proxy_site_block() {
     local label="$1"
     local port="$2"
     local scheme="$3"
-    local www_mode="$4"
-    local access_log="$5"
-    local primary
-    primary="$(get_primary_label "$label")"
-
-    if [[ "$www_mode" == "on" && "$primary" != www.* ]]; then
-        emit_www_redirect_block "$primary" "https"
-    fi
 
     cat <<EOF
 $label {
 EOF
-    emit_site_common_blocks "$primary" "$access_log"
+    emit_site_common_blocks
     if [[ "$scheme" == "http" ]]; then
         cat <<EOF
     reverse_proxy http://127.0.0.1:$port
@@ -884,20 +833,14 @@ build_path_proxy_site_block() {
     local port="$2"
     local path_prefix="$3"
     local scheme="$4"
-    local www_mode="$5"
-    local access_log="$6"
     local primary matcher_name
     primary="$(get_primary_label "$label")"
     matcher_name="@path_$(sanitize_name "$primary")_$(sanitize_name "$path_prefix")"
 
-    if [[ "$www_mode" == "on" && "$primary" != www.* ]]; then
-        emit_www_redirect_block "$primary" "https"
-    fi
-
     cat <<EOF
 $label {
 EOF
-    emit_site_common_blocks "$primary" "$access_log"
+    emit_site_common_blocks
     cat <<EOF
     $matcher_name path $path_prefix $path_prefix/*
     handle $matcher_name {
@@ -927,20 +870,12 @@ EOF
 build_static_site_block() {
     local label="$1"
     local site_dir="$2"
-    local www_mode="$3"
-    local access_log="$4"
-    local spa_mode="$5"
-    local primary
-    primary="$(get_primary_label "$label")"
-
-    if [[ "$www_mode" == "on" && "$primary" != www.* ]]; then
-        emit_www_redirect_block "$primary" "https"
-    fi
+    local spa_mode="$3"
 
     cat <<EOF
 $label {
 EOF
-    emit_site_common_blocks "$primary" "$access_log"
+    emit_site_common_blocks
     cat <<EOF
     root * $site_dir
 EOF
@@ -976,8 +911,6 @@ cmd_add() {
     local label="${1:-}"
     local port="${2:-}"
     local scheme="https"
-    local www_mode="off"
-    local access_log="off"
     local path_prefix=""
 
     shift $(( $# > 2 ? 2 : $# ))
@@ -986,8 +919,6 @@ cmd_add() {
         case "$1" in
             --http) scheme="http" ;;
             --https) scheme="https" ;;
-            --www) www_mode="on" ;;
-            --log) access_log="on" ;;
             --path)
                 shift
                 [[ $# -gt 0 ]] || { fail "--path 需要一个前缀"; return 1; }
@@ -1007,13 +938,6 @@ cmd_add() {
 
     label="$(trim "$label")"
     path_prefix="$(trim "$path_prefix")"
-
-    if [[ "$www_mode" == "off" ]] && prompt_yes_no "是否自动把 www 跳转到主域名？"; then
-        www_mode="on"
-    fi
-    if [[ "$access_log" == "off" ]] && prompt_yes_no "是否为该站点开启访问日志？"; then
-        access_log="on"
-    fi
 
     if ! validate_site_label "$label"; then
         fail "站点地址不合法"
@@ -1036,9 +960,9 @@ cmd_add() {
     oldbak="$(backup_file_if_exists "$file")"
 
     if [[ -n "$path_prefix" ]]; then
-        build_path_proxy_site_block "$label" "$port" "$path_prefix" "$scheme" "$www_mode" "$access_log" > "$file"
+        build_path_proxy_site_block "$label" "$port" "$path_prefix" "$scheme" > "$file"
     else
-        build_reverse_proxy_site_block "$label" "$port" "$scheme" "$www_mode" "$access_log" > "$file"
+        build_reverse_proxy_site_block "$label" "$port" "$scheme" > "$file"
     fi
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
@@ -1056,16 +980,12 @@ cmd_add() {
 cmd_add_static() {
     local label="${1:-}"
     local site_dir="${2:-}"
-    local www_mode="off"
-    local access_log="off"
     local spa_mode="off"
 
     shift $(( $# > 2 ? 2 : $# ))
 
     while (( $# > 0 )); do
         case "$1" in
-            --www) www_mode="on" ;;
-            --log) access_log="on" ;;
             --spa) spa_mode="on" ;;
             *) fail "未知 add-static 参数: $1"; return 1 ;;
         esac
@@ -1082,12 +1002,6 @@ cmd_add_static() {
     label="$(trim "$label")"
     site_dir="$(trim "$site_dir")"
 
-    if [[ "$www_mode" == "off" ]] && prompt_yes_no "是否自动把 www 跳转到主域名？"; then
-        www_mode="on"
-    fi
-    if [[ "$access_log" == "off" ]] && prompt_yes_no "是否为该站点开启访问日志？"; then
-        access_log="on"
-    fi
     if [[ "$spa_mode" == "off" ]] && prompt_yes_no "是否按单页应用启用 try_files /index.html？"; then
         spa_mode="on"
     fi
@@ -1105,7 +1019,7 @@ cmd_add_static() {
     file="$(site_path_for_label "$label")"
     oldbak="$(backup_file_if_exists "$file")"
 
-    build_static_site_block "$label" "$site_dir" "$www_mode" "$access_log" "$spa_mode" > "$file"
+    build_static_site_block "$label" "$site_dir" "$spa_mode" > "$file"
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
         fail "已回滚站点修改"
@@ -1123,8 +1037,6 @@ cmd_set() {
     local override_port=""
     local override_path="__keep__"
     local override_scheme=""
-    local override_www=""
-    local override_log=""
 
     shift $(( $# > 0 ? 1 : 0 ))
 
@@ -1142,10 +1054,6 @@ cmd_set() {
                 ;;
             --http) override_scheme="http" ;;
             --https) override_scheme="https" ;;
-            --www) override_www="on" ;;
-            --no-www) override_www="off" ;;
-            --log) override_log="on" ;;
-            --no-log) override_log="off" ;;
             *) fail "未知 set 参数: $1"; return 1 ;;
         esac
         shift
@@ -1160,7 +1068,7 @@ cmd_set() {
         return 1
     fi
 
-    local file site_type label target path_prefix scheme www_mode access_log
+    local file site_type label target path_prefix scheme
     if ! file="$(find_site_file "$query")"; then
         fail "未找到该站点"
         return 1
@@ -1191,14 +1099,6 @@ cmd_set() {
     fi
 
     path_prefix="$(sed -n 's/^[[:space:]]*uri strip_prefix[[:space:]]\+//p' "$file" | head -n 1)"
-    www_mode="off"
-    access_log="off"
-    if grep -Eq '^www\.[^[:space:]]+[[:space:]]*\{' "$file"; then
-        www_mode="on"
-    fi
-    if grep -Eq '^[[:space:]]*log[[:space:]]*\{' "$file"; then
-        access_log="on"
-    fi
 
     if [[ -n "$override_port" ]]; then
         if ! validate_port "$override_port"; then
@@ -1224,21 +1124,15 @@ cmd_set() {
                 ;;
         esac
     fi
-    if [[ -n "$override_www" ]]; then
-        www_mode="$override_www"
-    fi
-    if [[ -n "$override_log" ]]; then
-        access_log="$override_log"
-    fi
 
     local oldbak tmp
     oldbak="$(backup_file_if_exists "$file")"
     tmp="$(mktemp)"
 
     if [[ -n "$path_prefix" ]]; then
-        build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme" "$www_mode" "$access_log" > "$tmp"
+        build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme" > "$tmp"
     else
-        build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme" "$www_mode" "$access_log" > "$tmp"
+        build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme" > "$tmp"
     fi
     mv "$tmp" "$file"
 
