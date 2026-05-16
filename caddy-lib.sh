@@ -981,6 +981,72 @@ write_site_file_with_rollback() {
     return 0
 }
 
+build_emby_site_block() {
+    local label="$1"
+    local target_domain="$2"
+
+    cat <<EMBYEOF
+${label} {
+    reverse_proxy ${target_domain} {
+        header_up Host {upstream_hostport}
+    }
+}
+EMBYEOF
+}
+
+cmd_add_emby() {
+    local label="${1:-}"
+    local target_domain="${2:-}"
+
+    if [[ -z "$label" ]]; then
+        read -rp "请输入你的域名: " label
+    else
+        shift $(( $# > 0 ? 1 : 0 ))
+    fi
+    label="$(trim "$label")"
+    if [[ -z "$label" ]]; then
+        fail "域名不能为空"
+        return 1
+    fi
+
+    if [[ -z "$target_domain" ]]; then
+        read -rp "请输入目标 Emby 服务器地址（如 https://emby.example.com:443）: " target_domain
+    else
+        shift $(( $# > 0 ? 1 : 0 ))
+    fi
+    target_domain="$(trim "$target_domain")"
+    if [[ -z "$target_domain" ]]; then
+        fail "目标地址不能为空"
+        return 1
+    fi
+
+    # Auto-add https:// if missing
+    if [[ "$target_domain" != http://* ]] && [[ "$target_domain" != https://* ]]; then
+        target_domain="https://${target_domain}"
+    fi
+
+    local sanitized old_file new_file file oldbak site_block
+    sanitized="$(sanitize_name "$label")"
+    new_file="${SITES_DIR}/${sanitized}.conf"
+    old_file="${SITES_DIR}/${sanitized}.conf.disabled"
+
+    for file in "$new_file" "$old_file"; do
+        if [[ -s "$file" ]]; then
+            fail "配置已存在: $file"
+            say "如需修改请使用 c set $label --target <新地址>"
+            return 1
+        fi
+    done
+
+    site_block="$(build_emby_site_block "$label" "$target_domain")"
+    oldbak=""
+    ensure_dirs
+    write_site_file "$new_file" "$label" "$site_block" oldbak
+    fix_permissions
+    say "已添加 Emby 反代站点: $label -> $target_domain"
+    say "注意: Emby 反代不启用 gzip 压缩（避免影响流媒体传输）"
+}
+
 cmd_add() {
     local label="${1:-}"
     local port="${2:-}"
@@ -1111,6 +1177,7 @@ cmd_set() {
     local override_port=""
     local override_path="__keep__"
     local override_scheme=""
+    local override_emby_target=""
 
     shift $(( $# > 0 ? 1 : 0 ))
 
@@ -1125,6 +1192,11 @@ cmd_set() {
                 shift
                 [[ $# -gt 0 ]] || { fail "--path 需要路径参数"; return 1; }
                 override_path="$1"
+                ;;
+            --target)
+                shift
+                [[ $# -gt 0 ]] || { fail "--target 需要目标地址参数"; return 1; }
+                override_emby_target="$1"
                 ;;
             --http) override_scheme="http" ;;
             --https) override_scheme="https" ;;
@@ -1152,6 +1224,11 @@ cmd_set() {
     if [[ "$site_type" == "静态站点" ]]; then
         fail "当前仅支持编辑反代站点与路径反代站点，静态站点请使用 add-static 重新配置。"
         return 1
+    fi
+
+    if [[ "$site_type" == "Emby反代" ]]; then
+        cmd_set_emby "$file" "$site_type" "$label" "$query" "$override_emby_target"
+        return $?
     fi
 
     if ! label="$(extract_primary_site_label_from_file "$file")"; then
@@ -1280,6 +1357,8 @@ detect_site_type() {
         echo "静态站点"
     elif grep -Eq '^[[:space:]]*@path_.* path ' "$file" && grep -Eq '^[[:space:]]*uri strip_prefix ' "$file"; then
         echo "路径反代"
+    elif grep -Eq '^[[:space:]]*header_up Host \{upstream_hostport\}' "$file"; then
+        echo "Emby反代"
     elif grep -Eq '^[[:space:]]*reverse_proxy ' "$file"; then
         echo "反代站点"
     else
@@ -1300,6 +1379,10 @@ site_summary() {
             path_prefix="$(sed -n 's/^[[:space:]]*uri strip_prefix //p' "$file" | head -n 1)"
             target="$(sed -n 's/^[[:space:]]*reverse_proxy //p' "$file" | head -n 1)"
             echo "路径: ${path_prefix:-unknown} -> ${target:-unknown}"
+            ;;
+        "Emby反代")
+            target="$(sed -n 's/^[[:space:]]*reverse_proxy //p' "$file" | head -n 1)"
+            echo "Emby服务器: ${target:-unknown}"
             ;;
         "反代站点")
             target="$(sed -n 's/^[[:space:]]*reverse_proxy //p' "$file" | head -n 1)"
@@ -2002,7 +2085,8 @@ cmd_show_help() {
   c doctor
   c add <域名> <本地端口> [--http] [--path <前缀>]
   c add-static <域名> <目录> [--spa]
-  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
+  c add-emby <域名> <目标地址>
+  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
   c rm <域名>
   c enable <域名>
   c disable <域名>
@@ -2027,8 +2111,10 @@ cmd_show_help() {
   c add example.com 3000
   c add example.com 3000 --path /api
   c add-static static.example.com /var/www/site --spa
+  c add-emby emby.example.com https://10.0.0.5:8096
   c update
   c set example.com --port 4000
+  c set emby.example.com --target https://10.0.0.6:8096
   c timeout 45
   c upstream-mode strict
   c cert-check example.com
@@ -2239,11 +2325,12 @@ menu_sites() {
     show_menu_header "站点管理"
     echo "1. 添加反代站点"
     echo "2. 添加静态站点"
-    echo "3. 删除站点"
-    echo "4. 启用站点"
-    echo "5. 禁用站点"
-    echo "6. 查看站点列表"
-    echo "7. 编辑站点"
+    echo "3. 添加 Emby 反代"
+    echo "4. 删除站点"
+    echo "5. 启用站点"
+    echo "6. 禁用站点"
+    echo "7. 查看站点列表"
+    echo "8. 编辑站点"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -2294,11 +2381,12 @@ interactive_sites_menu() {
         case "$choice" in
             1) require_command caddy; with_global_lock run_mutation add cmd_add ;;
             2) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
-            3) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
-            4) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
-            5) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
-            6) cmd_list ;;
-            7) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            3) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
+            4) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
+            5) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
+            6) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
+            7) cmd_list ;;
+            8) require_command caddy; with_global_lock run_mutation set cmd_set ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -2396,6 +2484,7 @@ main() {
         doctor|check-env) cmd_doctor ;;
         add) shift; require_command caddy; with_global_lock run_mutation add cmd_add "$@" ;;
         add-static|static) shift; require_command caddy; with_global_lock run_mutation add-static cmd_add_static "$@" ;;
+        add-emby|emby) shift; require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby "$@" ;;
         set) shift; require_command caddy; with_global_lock run_mutation set cmd_set "$@" ;;
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
         enable) shift; require_command caddy; with_global_lock run_mutation enable cmd_enable "${1:-}" ;;
