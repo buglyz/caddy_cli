@@ -128,7 +128,7 @@ enable_and_restart_service() {
     fi
 
     systemctl enable caddy >/dev/null 2>&1 || true
-    systemctl restart caddy
+    systemctl restart caddy 2>/dev/null || log "(Warning) Caddy 启动失败，请手动检查配置"
 }
 
 main() {

@@ -313,7 +313,7 @@ validate_port() {
 }
 
 validate_email() {
-    [[ -z "$1" ]] && return 0
+    [[ -z "$1" ]] && return 0 # 允许空值用于清除 email
     [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
 }
 
@@ -853,6 +853,7 @@ site_path_for_label() {
         fi
         path="$SITES_DIR/${base}-${n}.conf"
         ((n++))
+        (( n > 1000 )) && { fail "无法生成唯一文件名"; return 1; }
     done
     echo "$path"
 }
@@ -999,23 +1000,31 @@ write_site_file() {
     local file="$1"
     local label="$2"
     local content="$3"
+    local oldbak="${4:-}"
 
     [[ -n "$file" && -n "$content" ]] || {
         fail "write_site_file: file or content empty"
         return 1
     }
 
-    printf '%s
+    printf '%s\n
 ' "$content" > "$file"
     chmod 644 "$file"
     chown root:caddy "$file" 2>/dev/null || true
 
     if ! apply_config; then
-        rm -f "$file"
-        fail "Caddy 配置重载失败，临时文件已删除"
+        if [[ -n "$oldbak" ]]; then
+            cp -a "$oldbak" "$file"
+            cleanup_paths "$oldbak"
+            fail "Caddy 配置重载失败，已回滚到旧配置"
+        else
+            rm -f "$file"
+            fail "Caddy 配置重载失败，临时文件已删除"
+        fi
         return 1
     fi
 
+    cleanup_paths "$oldbak"
     log_ok "站点 \e[1;36m${label}\e[0m 已写入并生效"
     return 0
 }
@@ -1233,7 +1242,7 @@ cmd_set_emby() {
     fi
 
     # Detect scheme from site label: domain only = https, http://domain = http
-    label_from_file="$(sed -n '1s/^[[:space:]]\{0,\}\(.\{1,\}\)[[:space:]]\{0,\}{//p' "$file")"
+    label_from_file="$(sed -n '1s/^[[:space:]]\{0,\}\(.\{1,\}\)[[:space:]]\{0,\}{/\1/p' "$file")"
     label_from_file="$(trim "$label_from_file")"
     if [[ "$label_from_file" == http://* ]]; then
         scheme="http"
@@ -1280,7 +1289,9 @@ cmd_set_emby() {
     local site_block
     site_block="$(build_emby_site_block "$label" "$new_target" "$scheme")"
 
-    write_site_file "$file" "$label" "$site_block"
+    local oldbak=""
+    oldbak="$(backup_file_if_exists "$file")"
+    write_site_file "$file" "$label" "$site_block" "$oldbak"
     fix_permissions
 }
 
