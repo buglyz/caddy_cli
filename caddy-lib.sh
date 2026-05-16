@@ -1350,7 +1350,7 @@ cmd_set() {
     fi
 
     if [[ "$site_type" == "Emby反代" ]]; then
-        cmd_set_emby "$file" "$site_type" "$label" "$query" "$override_emby_target"
+        cmd_set_emby "$file" "$site_type" "${label:-}" "$query" "$override_emby_target"
         return $?
     fi
 
