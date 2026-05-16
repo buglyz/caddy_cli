@@ -72,9 +72,10 @@ c import /path/to/Caddyfile   # 导入现有配置
 - 上游本地端口健康检查（`warn/strict`）
 - 全局并发锁，避免多终端同时修改互相覆盖
 - 配置应用前自动校验，失败自动回滚
+- 配置重载失败时自动降级 `restart`（兼容老 systemd）
 - 站点访问日志自动滚动（默认 `20MiB`、保留 `10` 份、保留 `720h`）
 - `c update` 同时更新前端脚本和共享库
-- Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，无需修改共享库
+- Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 
 ## 关键路径
 
