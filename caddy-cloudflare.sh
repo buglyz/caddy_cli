@@ -61,7 +61,7 @@ _hook_menu_config_items() {
 
 _hook_menu_config_handler() {
     case "$1" in
-        10) require_command caddy; with_global_lock run_mutation cloudflare cmd_cloudflare ;&
+        10) require_command caddy; with_global_lock run_mutation cloudflare cmd_cloudflare ;;
         *) return 1 ;;
     esac
 }
@@ -282,7 +282,7 @@ cloudflare_domain_accessible_with_token() {
             --data-urlencode "name=$candidate" \
             --data-urlencode "status=active" \
             --data-urlencode "per_page=1" \
-            -H "Authorization: Bearer $token" \
+        -H "Authorization: Bearer $token" \
             -H "Content-Type: application/json" 2>/dev/null || true)"
         [[ -n "$resp" ]] || continue
         if CF_JSON="$resp" python3 - <<'PY' >/dev/null 2>&1
