@@ -98,7 +98,8 @@ build_caddy_with_cloudflare() {
 }
 
 download_caddy_from_repo() {
-    log "[3/5] Downloading pre-built Caddy from repo..."
+    local step_label="${1:-}"
+    [[ -n "$step_label" ]] && log "[${step_label}] Downloading pre-built Caddy from repo..." || log "Downloading pre-built Caddy from repo..."
     local tmp
     tmp="$(mktemp)"
 
@@ -163,8 +164,21 @@ enable_service_debian() {
 
 # ── Alpine ───────────────────────────────────────────────
 
+# Install only the init script from Alpine caddy package (gives us /etc/init.d/caddy).
+# We overwrite the binary later with the CF build.
+install_alpine_init_script() {
+    if [[ -f /etc/init.d/caddy ]]; then
+        log "OpenRC init script already present"
+        return 0
+    fi
+    enable_community_repo
+    apk update
+    log "Installing caddy package for OpenRC init script (binary will be replaced)..."
+    apk add --no-cache caddy
+}
+
 install_deps_alpine() {
-    log "[1/4] Installing dependencies (Alpine)..."
+    log "[1/5] Installing dependencies (Alpine)..."
     apk update
     apk add --no-cache ca-certificates curl gnupg python3
 }
@@ -176,7 +190,7 @@ install_build_deps_alpine() {
 }
 
 prepare_layout_alpine() {
-    log "[3/4] Preparing layout and OpenRC service config..."
+    log "[4/5] Preparing layout and OpenRC service config..."
     install -d -m 0755 /etc/caddy /etc/caddy/sites.d /etc/caddy/globals.d /etc/caddy/backup /var/log/caddy
     touch /etc/caddy/caddyctl.conf
     chmod 644 /etc/caddy/caddyctl.conf
@@ -202,7 +216,7 @@ EOF
 }
 
 enable_service_alpine() {
-    log "[4/4] Enabling and starting Caddy (OpenRC)..."
+    log "[5/5] Enabling and starting Caddy (OpenRC)..."
     if ! command -v rc-service >/dev/null 2>&1; then
         log "rc-service not found, skip service startup."
         return
@@ -249,7 +263,7 @@ install_debian() {
         build_caddy_with_cloudflare
     else
         install_deps_debian
-        download_caddy_from_repo
+        download_caddy_from_repo "3/5"
     fi
 
     install_cli_cf "4/5"
@@ -273,15 +287,17 @@ install_alpine() {
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
 
     if [[ "$BUILD_FROM_SOURCE" -eq 1 ]]; then
+        install_alpine_init_script
         install_build_deps_alpine
         require_command go
-        log "[2/4] Building Caddy with Cloudflare DNS module..."
+        log "[2/5] Building Caddy with Cloudflare DNS module..."
         install_xcaddy
         build_caddy_with_cloudflare
     else
+        install_alpine_init_script
         install_deps_alpine
-        log "[2/4] Downloading pre-built Caddy (CGO_ENABLED=0, musl compatible)..."
-        download_caddy_from_repo
+        log "[2/5] Downloading pre-built Caddy (CGO_ENABLED=0, musl compatible)..."
+        download_caddy_from_repo "2/5"
         # Verify the binary actually works on this system
         if ! "$CADDY_BIN" version >/dev/null 2>&1; then
             log "Pre-built binary failed on this system, falling back to build from source..."
@@ -292,7 +308,7 @@ install_alpine() {
         fi
     fi
 
-    install_cli_cf "3/4"
+    install_cli_cf "3/5"
     prepare_layout_alpine
     enable_service_alpine
 
