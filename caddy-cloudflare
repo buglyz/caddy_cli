@@ -169,7 +169,9 @@ EOF
         if [[ ! -f /etc/conf.d/caddy ]]; then
             cat > /etc/conf.d/caddy <<'DEOF'
 # Managed by caddyctl
-[ -f /etc/caddy/cloudflare.env ] && . /etc/caddy/cloudflare.env
+if [ -f /etc/caddy/cloudflare.env ]; then
+    . /etc/caddy/cloudflare.env
+fi
 DEOF
         fi
         chmod 644 /etc/conf.d/caddy 2>/dev/null || true

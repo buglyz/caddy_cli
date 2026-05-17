@@ -123,6 +123,10 @@ install_caddy_binary() {
         dpkg-divert --local --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
     fi
     install -m 0755 "$src" "$CADDY_BIN"
+    # Alpine: OpenRC init script expects caddy at /usr/sbin/caddy
+    if [ -f /etc/alpine-release ]; then
+        install -m 0755 "$src" /usr/sbin/caddy
+    fi
     log "Caddy installed: $("$CADDY_BIN" version 2>&1 | head -1)"
 }
 
@@ -213,7 +217,9 @@ prepare_layout_alpine() {
     if [[ ! -f "$OPENRC_CONF_D" ]]; then
         cat > "$OPENRC_CONF_D" <<'EOF'
 # Managed by caddyctl
-[ -f /etc/caddy/cloudflare.env ] && . /etc/caddy/cloudflare.env
+if [ -f /etc/caddy/cloudflare.env ]; then
+    . /etc/caddy/cloudflare.env
+fi
 EOF
         chmod 644 "$OPENRC_CONF_D"
     fi
