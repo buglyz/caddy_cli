@@ -166,6 +166,20 @@ enable_service_debian() {
 
 # Install only the init script from Alpine caddy package (gives us /etc/init.d/caddy).
 # We overwrite the binary later with the CF build.
+enable_community_repo() {
+    if grep -q '^http.*/community' /etc/apk/repositories 2>/dev/null; then
+        return 0
+    fi
+    log "Enabling Alpine community repository..."
+    local mirror ver
+    mirror="$(grep '^http.*/main$' /etc/apk/repositories 2>/dev/null | head -1 | sed 's,/main$,,' || true)"
+    if [[ -z "$mirror" ]]; then
+        ver="$(cut -d. -f1,2 /etc/alpine-release)"
+        mirror="https://dl-cdn.alpinelinux.org/alpine/v${ver}"
+    fi
+    echo "${mirror}/community" >> /etc/apk/repositories
+}
+
 install_alpine_init_script() {
     if [[ -f /etc/init.d/caddy ]]; then
         log "OpenRC init script already present"
