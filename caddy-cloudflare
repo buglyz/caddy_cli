@@ -246,7 +246,6 @@ except Exception:
     raise SystemExit(1)
 if not data.get("success"):
     raise SystemExit(1)
-text = json.dumps(data, ensure_ascii=False)
 if data.get("result", {}).get("status") != "active":
     raise SystemExit(1)
 PY
@@ -433,6 +432,10 @@ cmd_cloudflare() {
             cp -a "$dropin_bak" "$CLOUDFLARE_SERVICE_DROPIN"
         else
             rm -f "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
+        fi
+        # OpenRC: restore conf.d/caddy if backed up
+        if [[ -f /etc/conf.d/caddy ]]; then
+            rm -f /etc/conf.d/caddy 2>/dev/null || true
         fi
         fix_permissions
         if service_ready; then
