@@ -166,6 +166,12 @@ enable_service_debian() {
 install_deps_alpine() {
     log "[1/4] Installing dependencies (Alpine)..."
     apk update
+    apk add --no-cache ca-certificates curl gnupg python3
+}
+
+install_build_deps_alpine() {
+    log "[build] Installing build dependencies (Alpine)..."
+    apk update
     apk add --no-cache ca-certificates curl gnupg git go python3
 }
 
@@ -264,14 +270,27 @@ install_alpine() {
     require_command curl
 
     log "Starting Caddy Cloudflare installer (Alpine Linux)..."
-    log "Mode: Build from source (required — pre-built binary is glibc, Alpine uses musl)"
+    log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
 
-    install_deps_alpine
-    require_command go
-
-    log "[2/4] Building Caddy with Cloudflare DNS module..."
-    install_xcaddy
-    build_caddy_with_cloudflare
+    if [[ "$BUILD_FROM_SOURCE" -eq 1 ]]; then
+        install_build_deps_alpine
+        require_command go
+        log "[2/4] Building Caddy with Cloudflare DNS module..."
+        install_xcaddy
+        build_caddy_with_cloudflare
+    else
+        install_deps_alpine
+        log "[2/4] Downloading pre-built Caddy (CGO_ENABLED=0, musl compatible)..."
+        download_caddy_from_repo
+        # Verify the binary actually works on this system
+        if ! "$CADDY_BIN" version >/dev/null 2>&1; then
+            log "Pre-built binary failed on this system, falling back to build from source..."
+            install_build_deps_alpine
+            require_command go
+            install_xcaddy
+            build_caddy_with_cloudflare
+        fi
+    fi
 
     install_cli_cf "3/4"
     prepare_layout_alpine
@@ -293,7 +312,8 @@ Usage: $0 [--build-from-source]
   Default (Debian): download pre-built Caddy from GitHub repo (fast, no Go needed)
   --build-from-source  Build Caddy from source with xcaddy (needs Go)
 
-  Alpine: always builds from source (musl libc compatibility).
+  Alpine: uses pre-built binary by default (CGO_ENABLED=0, musl compatible).
+          Use --build-from-source to compile locally instead.
 EOF
 }
 
