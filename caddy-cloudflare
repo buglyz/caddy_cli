@@ -227,7 +227,7 @@ except Exception:
 if not data.get("success"):
     raise SystemExit(1)
 text = json.dumps(data, ensure_ascii=False)
-if not re.search(r'DNS.*(Edit|Write)|(Edit|Write).*DNS', text, re.I):
+if data.get("result", {}).get("status") != "active":
     raise SystemExit(1)
 PY
     then

@@ -424,6 +424,21 @@ validate_config_file() {
     LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX.log)"
     local _validate_extra_args
     _validate_extra_args="$(_hook_validate_args)"
+    # Caddy < 2.7 doesn't support --envfile; source env inline
+    local _caddy_ver
+    _caddy_ver="$(caddy version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1 || true)"
+    if [[ -n "$_caddy_ver" ]] && printf '%s\n' "$_caddy_ver" "2.7" | sort -V | head -1 | grep -q '^2\.7'; then
+        :
+    else
+        if [[ "$_validate_extra_args" == *--envfile* ]]; then
+            local _envf
+            _envf="$(echo "$_validate_extra_args" | sed -n 's/.*--envfile *\([^ ]*\).*/\1/p')"
+            if [[ -f "$_envf" ]]; then
+                set -a; source "$_envf" 2>/dev/null || true; set +a
+            fi
+            _validate_extra_args=""
+        fi
+    fi
     # shellcheck disable=SC2086
     caddy validate $_validate_extra_args --config "$config_path" --adapter caddyfile >"$LAST_VALIDATE_LOG" 2>&1
 }
