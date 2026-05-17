@@ -105,3 +105,10 @@ c cert-check your-domain.com
 - 需要 `root/sudo` 运行
 - 如果系统没有 `systemctl`，脚本只写配置，不会自动重载服务
 - Cloudflare DNS 版需要先运行 `c cf-env` 配置 API token
+
+## 贡献者
+
+| 贡献者 | 角色 |
+|--------|------|
+| [@buglyz](https://github.com/buglyz) | 作者 |
+| Hermes (爪爪) | AI 协作者 — Bug 发现/修复、DNS-01 E2E 测试、预编译 Caddy 构建 |
