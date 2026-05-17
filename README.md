@@ -1,14 +1,14 @@
 # Caddy CLI 管理脚本
 
-一个面向服务器运维的 Caddy 管理脚本集合，采用**共享库 + 前端**架构，消除重复代码。
+一个面向服务器运维的 Caddy 管理脚本集合，采用**共享库 + 前端**架构，消除重复代码。支持 **Debian/Ubuntu** 和 **Alpine Linux**。
 
 | 文件 | 说明 |
 |------|------|
 | `caddy-lib.sh` | 共享引擎（hook 架构，所有公共逻辑） |
-| `caddy.sh` | 标准版前端（23 行，source 共享库） |
-| `caddy-cloudflare.sh` | Cloudflare DNS 版前端（override 10 个 hook 注入 CF 功能） |
-| `install.sh` | 标准版一键安装 |
-| `install-cloudflare.sh` | Cloudflare DNS 版一键安装 |
+| `caddy.sh` | 标准版前端（27 行，source 共享库） |
+| `caddy-cloudflare` | Cloudflare DNS 版前端（override 10 个 hook 注入 CF 功能） |
+| `install.sh` | 标准版一键安装（自动检测 Debian/Alpine） |
+| `install-cloudflare.sh` | Cloudflare DNS 版一键安装（含预编译 Caddy 二进制） |
 
 ## 快速开始
 
@@ -21,6 +21,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/instal
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install-cloudflare.sh)
 ```
+
+> Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
+> CF 版的预编译二进制是 `CGO_ENABLED=0` 纯静态编译，glibc 和 musl 通用。
 
 安装完成后直接运行：
 ```bash
@@ -76,12 +79,23 @@ c import /path/to/Caddyfile   # 导入现有配置
 - 站点访问日志自动滚动（默认 `20MiB`、保留 `10` 份、保留 `720h`）
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
+- 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
+
+## 发行版支持
+
+| 发行版 | 标准版 | Cloudflare DNS 版 |
+|--------|--------|-------------------|
+| Debian / Ubuntu | `apt` + Cloudsmith 官方源 | 预编译二进制 或 `--build-from-source` |
+| Alpine Linux | `apk` + community 源 | 预编译二进制（CGO_ENABLED=0 纯静态）或 `--build-from-source` |
+
+> Cloudflare DNS 版在 Alpine 上如需从源码编译：  
+> `bash install-cloudflare.sh --build-from-source`
 
 ## 关键路径
 
 | 路径 | 说明 |
 |------|------|
-| `/etc/caddy/Caddyfile` | 主配置（由脚本自动生成） |
+| `/etc/caddy/Caddyfile` | 主配置（由脚本自动生成，**请勿手动编辑**） |
 | `/etc/caddy/sites.d` | 站点配置片段 |
 | `/etc/caddy/globals.d` | 全局配置片段 |
 | `/etc/caddy/caddyctl.conf` | 状态文件 |
@@ -103,5 +117,6 @@ c cert-check your-domain.com
 ## 注意事项
 
 - 需要 `root/sudo` 运行
-- 如果系统没有 `systemctl`，脚本只写配置，不会自动重载服务
-- Cloudflare DNS 版需要先运行 `c cf-env` 配置 API token
+- 如果系统没有 service manager（systemd / OpenRC），脚本只写配置，不会自动重载服务
+- Cloudflare DNS 版需要先运行 `c cloudflare <token>` 配置 API token
+- **不要手动编辑 `/etc/caddy/Caddyfile`**，它由脚本从 `sites.d/` 和 `globals.d/` 自动生成
