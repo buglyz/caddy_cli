@@ -343,7 +343,7 @@ cloudflare_dns_ready() {
 cmd_cloudflare() {
     local token="${1:-}"
     local action="set"
-    local env_bak dropin_bak had_env=0 had_dropin=0
+    local env_bak="" dropin_bak="" had_env=0 had_dropin=0
     local token_value
 
     case "$token" in
