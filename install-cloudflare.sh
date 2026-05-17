@@ -168,33 +168,45 @@ enable_service_debian() {
 
 # ── Alpine ───────────────────────────────────────────────
 
-# Install only the init script from Alpine caddy package (gives us /etc/init.d/caddy).
-# We overwrite the binary later with the CF build.
-enable_community_repo() {
-    if grep -q '^http.*/community' /etc/apk/repositories 2>/dev/null; then
-        return 0
-    fi
-    log "Enabling Alpine community repository..."
-    local mirror ver
-    mirror="$(grep '^http.*/main$' /etc/apk/repositories 2>/dev/null | head -1 | sed 's,/main$,,' || true)"
-    if [[ -z "$mirror" ]]; then
-        ver="$(cut -d. -f1,2 /etc/alpine-release)"
-        mirror="https://dl-cdn.alpinelinux.org/alpine/v${ver}"
-    fi
-    echo "${mirror}/community" >> /etc/apk/repositories
-}
-
+# Write a minimal OpenRC init script directly -- no need to install
+# the Alpine caddy package (which pulls unwanted deps and may hang).
 install_alpine_init_script() {
     if [[ -f /etc/init.d/caddy ]]; then
         log "OpenRC init script already present"
         return 0
     fi
-    enable_community_repo
-    apk update
-    log "Installing caddy package for OpenRC init script (binary will be replaced)..."
-    apk add --no-cache caddy
+    log "Creating OpenRC init script for Caddy..."
+    cat > /etc/init.d/caddy <<'INITEOF'
+#!/sbin/openrc-run
+name="caddy"
+description="Caddy web server"
+command=/usr/bin/caddy
+command_args="run --config /etc/caddy/Caddyfile --adapter caddyfile"
+command_background=true
+pidfile=/run/caddy.pid
+depend() {
+    need net
+    after firewall
+}
+INITEOF
+    chmod 755 /etc/init.d/caddy
 }
 
+# Ensure caddy user/group exists for OpenRC (best-effort, non-fatal)
+ensure_caddy_user() {
+    if getent group caddy >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v addgroup >/dev/null 2>&1; then
+        addgroup -S caddy 2>/dev/null || true
+    fi
+    if getent passwd caddy >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v adduser >/dev/null 2>&1; then
+        adduser -S -D -H -h /var/lib/caddy -s /sbin/nologin -G caddy -g caddy caddy 2>/dev/null || true
+    fi
+}
 install_deps_alpine() {
     log "[1/5] Installing dependencies (Alpine)..."
     apk update
@@ -329,6 +341,7 @@ install_alpine() {
     fi
 
     install_cli_cf "3/5"
+    ensure_caddy_user
     prepare_layout_alpine
     enable_service_alpine
 
