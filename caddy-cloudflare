@@ -44,6 +44,11 @@ _hook_fix_permissions() {
         chown root:root "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
         chmod 644 "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
     fi
+    # OpenRC: ensure conf.d is readable
+    if [[ -f /etc/conf.d/caddy ]]; then
+        chown root:root /etc/conf.d/caddy 2>/dev/null || true
+        chmod 644 /etc/conf.d/caddy 2>/dev/null || true
+    fi
 }
 
 _hook_render_global_options() {
@@ -88,6 +93,9 @@ _hook_cmd_doctor() {
     fi
     if [[ -f "$CLOUDFLARE_SERVICE_DROPIN" ]]; then
         echo "[OK] Cloudflare service drop-in 存在"
+    fi
+    if [[ -f /etc/conf.d/caddy ]]; then
+        echo "[OK] OpenRC conf.d/caddy 存在"
     fi
     if cloudflare_env_configured; then
         echo "[OK] Cloudflare API Token 已配置"
@@ -146,14 +154,26 @@ escape_env_value() {
 }
 
 ensure_cloudflare_service_dropin() {
-    install -d -m 0755 "$(dirname "$CLOUDFLARE_SERVICE_DROPIN")"
-    if [[ ! -f "$CLOUDFLARE_SERVICE_DROPIN" ]]; then
-        cat > "$CLOUDFLARE_SERVICE_DROPIN" <<EOF
+    if command_exists systemctl; then
+        # systemd: EnvironmentFile drop-in
+        install -d -m 0755 "$(dirname "$CLOUDFLARE_SERVICE_DROPIN")"
+        if [[ ! -f "$CLOUDFLARE_SERVICE_DROPIN" ]]; then
+            cat > "$CLOUDFLARE_SERVICE_DROPIN" <<EOF
 [Service]
 EnvironmentFile=-$CLOUDFLARE_ENV_FILE
 EOF
+        fi
+        chmod 644 "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
+    elif command_exists rc-service; then
+        # OpenRC: source cloudflare.env from conf.d
+        if [[ ! -f /etc/conf.d/caddy ]]; then
+            cat > /etc/conf.d/caddy <<'DEOF'
+# Managed by caddyctl
+[ -f /etc/caddy/cloudflare.env ] && . /etc/caddy/cloudflare.env
+DEOF
+        fi
+        chmod 644 /etc/conf.d/caddy 2>/dev/null || true
     fi
-    chmod 644 "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
 }
 
 write_cloudflare_env_file() {
