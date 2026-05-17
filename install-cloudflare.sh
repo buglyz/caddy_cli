@@ -10,6 +10,9 @@ readonly XCADDY_BIN="/usr/local/bin/xcaddy"
 readonly CLOUDFLARE_MODULE="github.com/caddy-dns/cloudflare"
 readonly CLOUD_FILE_DROPIN="/etc/systemd/system/caddy.service.d/10-cloudflare-env.conf"
 readonly CLOUD_ENV_FILE="/etc/caddy/cloudflare.env"
+readonly RELEASE_URL="https://github.com/buglyz/caddy_cli/releases/download/v2.11.3-cloudflare/caddy"
+
+USE_RELEASE=0
 
 log() {
     echo "$*"
@@ -31,26 +34,27 @@ require_command() {
 }
 
 install_dependencies() {
-    log "[1/6] Installing dependencies..."
+    log "[1/5] Installing dependencies..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg git golang-go build-essential python3
+        ca-certificates curl gnupg git python3
 }
 
 install_xcaddy() {
-    log "[2/6] Installing xcaddy..."
+    log "[2/5] Installing xcaddy..."
     if [[ -x "$XCADDY_BIN" ]]; then
         log "xcaddy already installed: $XCADDY_BIN"
         return
     fi
 
+    require_command go
     GOBIN="$(dirname "$XCADDY_BIN")" go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
     [[ -x "$XCADDY_BIN" ]] || die "xcaddy installation failed: $XCADDY_BIN"
 }
 
 build_caddy_with_cloudflare() {
-    log "[3/6] Building Caddy with Cloudflare DNS module..."
+    log "[3/5] Building Caddy with Cloudflare DNS module..."
     local tmpdir built
     tmpdir="$(mktemp -d)"
     built="$tmpdir/caddy"
@@ -58,18 +62,34 @@ build_caddy_with_cloudflare() {
     "$XCADDY_BIN" build --with "$CLOUDFLARE_MODULE" --output "$built"
     [[ -s "$built" ]] || die "Built Caddy binary is empty"
 
-    if command -v dpkg-divert >/dev/null 2>&1; then
-        dpkg-divert --local --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
-    fi
-
-    install -m 0755 "$built" "$CADDY_BIN"
+    install_caddy_binary "$built"
     rm -rf "$tmpdir"
 }
 
-install_cli() {
-    log "[4/6] Installing c command..."
+download_caddy_from_release() {
+    log "[3/5] Downloading pre-built Caddy from GitHub Release..."
+    local tmp
+    tmp="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 --max-time 300 \
+        "$RELEASE_URL" -o "$tmp"
+    [[ -s "$tmp" ]] || die "Downloaded Caddy binary is empty: $RELEASE_URL"
 
-    # Download and install shared library
+    install_caddy_binary "$tmp"
+    rm -f "$tmp"
+}
+
+install_caddy_binary() {
+    local src="$1"
+    if command -v dpkg-divert >/dev/null 2>&1; then
+        dpkg-divert --local --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
+    fi
+    install -m 0755 "$src" "$CADDY_BIN"
+    log "Caddy installed: $("$CADDY_BIN" version 2>&1 | head -1)"
+}
+
+install_cli() {
+    log "[4/5] Installing c command..."
+
     local tmp_lib
     tmp_lib="$(mktemp)"
     curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
@@ -78,7 +98,6 @@ install_cli() {
     install -m 0644 "$tmp_lib" "$LIB_BIN"
     rm -f "$tmp_lib"
 
-    # Download and install Cloudflare CLI frontend
     local tmp_cli
     tmp_cli="$(mktemp)"
     curl -fsSL --retry 3 --retry-delay 1 "$CADDY_CF_URL" -o "$tmp_cli"
@@ -89,7 +108,7 @@ install_cli() {
 }
 
 prepare_layout() {
-    log "[5/6] Preparing layout and Cloudflare service drop-in..."
+    log "[5/5] Preparing layout and Cloudflare service drop-in..."
     install -d -m 0755 /etc/caddy /etc/caddy/sites.d /etc/caddy/globals.d /etc/caddy/backup /var/log/caddy
     touch /etc/caddy/caddyctl.conf
     chmod 644 /etc/caddy/caddyctl.conf
@@ -113,7 +132,7 @@ EOF
 }
 
 enable_and_restart_service() {
-    log "[6/6] Enabling and restarting Caddy service..."
+    log "Enabling and restarting Caddy service..."
     if ! command -v systemctl >/dev/null 2>&1; then
         log "systemctl not found, skip service startup."
         return
@@ -130,11 +149,31 @@ main() {
     require_command curl
     require_command bash
 
+    # Parse flags
+    for arg in "$@"; do
+        case "$arg" in
+            --use-release) USE_RELEASE=1 ;;
+            --help|-h)
+                echo "Usage: $0 [--use-release]"
+                echo "  --use-release  Download pre-built Caddy from GitHub Release (skip Go/xcaddy/build)"
+                exit 0
+                ;;
+        esac
+    done
+
     log "Starting Caddy Cloudflare installer..."
+    log "Mode: $([ "$USE_RELEASE" -eq 1 ] && echo 'Pre-built Release' || echo 'Build from source')"
+
     install_dependencies
-    require_command go
-    install_xcaddy
-    build_caddy_with_cloudflare
+
+    if [[ "$USE_RELEASE" -eq 1 ]]; then
+        download_caddy_from_release
+    else
+        require_command go
+        install_xcaddy
+        build_caddy_with_cloudflare
+    fi
+
     install_cli
     prepare_layout
     enable_and_restart_service
@@ -142,9 +181,9 @@ main() {
     echo
     log "Install complete."
     log "--------------------------------"
-    log "Open panel: c"
-    log "Run doctor: c doctor"
-    log "Set Cloudflare token: c cloudflare <token>"
+    log "c doctor        检查环境"
+    log "c cloudflare <token>  设置 Cloudflare Token"
+    log "c cloudflare check    检查 DNS-01 就绪"
     log "--------------------------------"
 }
 
