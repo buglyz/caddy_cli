@@ -464,7 +464,7 @@ cmd_cloudflare() {
         svc_restart
     fi
 
-    cleanup_paths "$env_bak" "$dropin_bak"
+    cleanup_paths "$env_bak" "$dropin_bak" "$confd_bak"
     say "Cloudflare DNS-01 已更新"
 }
 
