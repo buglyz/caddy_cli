@@ -1620,7 +1620,11 @@ find_site_file() {
 
 detect_site_type() {
     local file="$1"
-    if grep -Eq '^[[:space:]]*file_server([[:space:]]|$)' "$file"; then
+    if grep -q '通用反代网关' "$file" 2>/dev/null; then
+        echo "网关"
+    elif grep -q 'Emby 流媒体反代' "$file" 2>/dev/null; then
+        echo "Emby反代"
+    elif grep -Eq '^[[:space:]]*file_server([[:space:]]|$)' "$file"; then
         echo "静态站点"
     elif grep -Eq '^[[:space:]]*@path_.* path ' "$file" && grep -Eq '^[[:space:]]*uri strip_prefix ' "$file"; then
         echo "路径反代"
@@ -1650,6 +1654,9 @@ site_summary() {
         "Emby反代")
             target="$(sed -n 's/^[[:space:]]*reverse_proxy //p' "$file" | head -n 1)"
             echo "Emby服务器: ${target:-unknown}"
+            ;;
+        "网关")
+            echo "通用反代网关（动态上游，无需指定目标）"
             ;;
         "反代站点")
             target="$(sed -n 's/^[[:space:]]*reverse_proxy //p' "$file" | head -n 1)"
