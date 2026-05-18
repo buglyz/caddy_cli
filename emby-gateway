@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# emby-gateway — 通用反代网关（Caddy 版本）
+# 从 emby-proxy-toolbox nginx 配置转换而来
+# 用法: emby-gateway --domain <域名> [--no-ssl]
+set -euo pipefail
+
+DOMAIN=""
+NO_SSL=0
+CADDY_SITES_DIR="${CADDY_SITES_DIR:-/etc/caddy/sites.d}"
+CONF_FILE=""
+
+usage() {
+    cat <<'EOF'
+用法: emby-gateway --domain <域名> [--no-ssl]
+
+  通用反向代理网关 — 在 Caddy 上部署，通过 URL 路径动态反代任意上游。
+
+  --domain <域名>   网关域名（如 gate.example.com）
+  --no-ssl          禁用 HTTPS（仅 HTTP 模式）
+
+示例:
+  emby-gateway --domain gate.example.com
+  emby-gateway --domain gate.local --no-ssl
+
+使用方式（部署后）:
+  https://gate.example.com/192.168.1.100:8096/   → 反代到 HTTPS 上游
+  https://gate.example.com/http/10.0.0.5:8080/   → 反代到 HTTP 上游
+  https://gate.example.com/https/1.2.3.4:443/    → 显式 HTTPS 上游
+EOF
+    exit 0
+}
+
+# ── 参数解析 ──
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --domain) DOMAIN="$2"; shift 2 ;;
+        --no-ssl) NO_SSL=1; shift ;;
+        -h|--help) usage ;;
+        *) echo "未知参数: $1"; usage ;;
+    esac
+done
+
+if [[ -z "$DOMAIN" ]]; then
+    read -rp "请输入网关域名: " DOMAIN
+fi
+[[ -n "$DOMAIN" ]] || { echo "域名不能为空"; exit 1; }
+
+CONF_FILE="$CADDY_SITES_DIR/${DOMAIN}.conf"
+
+if [[ -f "$CONF_FILE" ]]; then
+    read -rp "站点 $DOMAIN 已存在，覆盖？[y/N]: " CONFIRM
+    [[ "${CONFIRM,,}" == "y" ]] || exit 0
+fi
+
+echo "正在生成 Caddy 配置: $CONF_FILE"
+
+# ── 公共路由块（HTTP/HTTPS 模式复用） ──
+ROUTES=$(cat <<'ROUTES'
+    request_body {
+        max_size 500MB
+    }
+
+    # 使用说明
+    handle / {
+        respond <<INFO
+OK
+
+通用反代网关 — Emby Proxy Toolbox (Caddy)
+
+使用方式：
+  __SCHEME__://__DOMAIN__/<上游主机:端口>/路径
+  __SCHEME__://__DOMAIN__/http/<上游主机:端口>/路径
+  __SCHEME__://__DOMAIN__/https/<上游主机:端口>/路径
+
+默认按 HTTPS 回源；若需 HTTP 回源请使用 /http 前缀。
+INFO 200
+    }
+
+    # 尾部斜杠重定向 — HTTP 前缀
+    @noSlashHttp path_regexp redir_http ^/http/([A-Za-z0-9.\-_:]+)$
+    redir @noSlashHttp /http/{re.redir_http.1}/ 308
+
+    # 尾部斜杠重定向 — HTTPS 前缀
+    @noSlashHttps path_regexp redir_https ^/https/([A-Za-z0-9.\-_:]+)$
+    redir @noSlashHttps /https/{re.redir_https.1}/ 308
+
+    # HTTP 上游反代
+    @httpProxy path_regexp up_http ^/http/([^/]+)(/.*)
+    handle @httpProxy {
+        rewrite * {re.up_http.2}
+        reverse_proxy {
+            to {re.up_http.1}
+            transport http
+            header_up Host {re.up_http.1}
+            flush_interval -1
+        }
+    }
+
+    # HTTPS 上游反代（显式 /https/ 前缀）
+    @httpsProxy path_regexp up_https ^/https/([^/]+)(/.*)
+    handle @httpsProxy {
+        rewrite * {re.up_https.2}
+        reverse_proxy {
+            to {re.up_https.1}
+            transport http {
+                tls
+            }
+            header_up Host {re.up_https.1}
+            flush_interval -1
+        }
+    }
+
+    # 默认上游反代（无前缀 → HTTPS）
+    @defaultProxy {
+        path_regexp up_default ^/([^/]+)(/.*)
+        not path /http/* /https/*
+    }
+    handle @defaultProxy {
+        rewrite * {re.up_default.2}
+        reverse_proxy {
+            to {re.up_default.1}
+            transport http {
+                tls
+            }
+            header_up Host {re.up_default.1}
+            flush_interval -1
+        }
+    }
+
+    # 尾部斜杠重定向 — 裸路径（放最后）
+    @noSlash path_regexp redir_bare ^/([A-Za-z0-9.\-_:]+)$
+    redir @noSlash /{re.redir_bare.1}/ 308
+ROUTES
+)
+
+if [[ "$NO_SSL" -eq 1 ]]; then
+    SCHEME="http"
+    cat > "$CONF_FILE" <<CADDY
+# Emby 通用反代网关 (HTTP)
+# 域名: ${DOMAIN}
+# 生成: $(date '+%F %T')
+
+http://${DOMAIN} {
+$(echo "$ROUTES" | sed "s|__SCHEME__|http|g; s|__DOMAIN__|${DOMAIN}|g")
+}
+CADDY
+
+else
+    SCHEME="https"
+    cat > "$CONF_FILE" <<CADDY
+# Emby 通用反代网关 (HTTPS)
+# 域名: ${DOMAIN}
+# 生成: $(date '+%F %T')
+
+${DOMAIN} {
+$(echo "$ROUTES" | sed "s|__SCHEME__|https|g; s|__DOMAIN__|${DOMAIN}|g")
+}
+CADDY
+
+fi
+
+echo "配置已写入: $CONF_FILE"
+
+# ── 校验并重载 ──
+if command -v caddy &>/dev/null; then
+    echo "校验 Caddy 配置..."
+    if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1 | grep -q 'Valid'; then
+        echo "配置校验通过，重载 Caddy..."
+        if command -v c &>/dev/null && c apply &>/dev/null; then
+            echo "已通过 caddy-cli 重载"
+        else
+            systemctl reload caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+            echo "已重载 Caddy"
+        fi
+    else
+        echo "⚠ 配置校验失败，请检查: $CONF_FILE"
+        caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1
+        exit 1
+    fi
+else
+    echo "⚠ 未检测到 caddy，配置已生成但未重载"
+    echo "   安装 Caddy 后执行: systemctl reload caddy"
+fi
+
+echo
+echo "======================================"
+echo "  部署完成"
+echo "  域名: ${DOMAIN}"
+echo "  SSL: $([ "$NO_SSL" -eq 1 ] && echo '关闭' || echo '开启（Lets Encrypt 自动签发）')"
+echo "======================================"
+echo
+if [[ "$NO_SSL" -eq 1 ]]; then
+    echo "使用方式:"
+    echo "  http://${DOMAIN}/<上游IP:端口>"
+    echo "  http://${DOMAIN}/http/<上游IP:端口>"
+else
+    echo "使用方式:"
+    echo "  https://${DOMAIN}/<上游IP:端口>"
+    echo "  https://${DOMAIN}/http/<上游IP:端口>"
+fi
