@@ -2662,11 +2662,12 @@ interactive_sites_menu() {
             1) require_command caddy; with_global_lock run_mutation add cmd_add ;;
             2) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
             3) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
-            4) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
-            5) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
-            6) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
-            7) cmd_list ;;
-            8) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            4) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
+            5) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
+            6) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
+            7) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
+            8) cmd_list ;;
+            9) require_command caddy; with_global_lock run_mutation set cmd_set ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
