@@ -26,6 +26,7 @@ fi
 # ═══════════════════════════════════════
 CLOUDFLARE_ENV_FILE="/etc/caddy/cloudflare.env"
 CLOUDFLARE_SERVICE_DROPIN="/etc/systemd/system/caddy.service.d/10-cloudflare-env.conf"
+OPENRC_CONF_D="/etc/conf.d/caddy"
 
 # ═══════════════════════════════════════
 # Hook 覆盖 — 注入 Cloudflare 行为
@@ -45,9 +46,9 @@ _hook_fix_permissions() {
         chmod 644 "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
     fi
     # OpenRC: ensure conf.d/caddy permissions
-    if [[ -f /etc/conf.d/caddy ]]; then
-        chown root:root /etc/conf.d/caddy 2>/dev/null || true
-        chmod 644 /etc/conf.d/caddy 2>/dev/null || true
+    if [[ -f "$OPENRC_CONF_D" ]]; then
+        chown root:root "$OPENRC_CONF_D" 2>/dev/null || true
+        chmod 644 "$OPENRC_CONF_D" 2>/dev/null || true
     fi
 }
 
@@ -102,7 +103,7 @@ _hook_cmd_doctor() {
     else
         echo "[WARN] 未检测到 Cloudflare DNS 模块（需用 install-cloudflare.sh 安装）"
     fi
-    if [[ -f /etc/conf.d/caddy ]]; then
+    if [[ -f "$OPENRC_CONF_D" ]]; then
         echo "[OK] OpenRC conf.d/caddy 存在"
     fi
 }
@@ -164,14 +165,14 @@ EOF
         fi
         chmod 644 "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
     elif command_exists rc-service; then
-        if [[ ! -f /etc/conf.d/caddy ]]; then
-            cat > /etc/conf.d/caddy <<'DEOF'
+        if [[ ! -f "$OPENRC_CONF_D" ]]; then
+            cat > "$OPENRC_CONF_D" <<'DEOF'
 # Managed by caddyctl
 if [ -f /etc/caddy/cloudflare.env ]; then
     . /etc/caddy/cloudflare.env
 fi
 DEOF
-            chmod 644 /etc/conf.d/caddy
+            chmod 644 "$OPENRC_CONF_D"
         fi
     fi
 }
