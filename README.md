@@ -38,6 +38,8 @@ sudo c help     # 命令行模式
 c add example.com 3000 --www --log
 c add example.com 3000 --path /api --log
 c add-static static.example.com /var/www/site --www --spa
+c add-gateway gate.example.com           # 通用反代网关 (HTTPS)
+c add-gateway gate.local --no-ssl        # 通用反代网关 (HTTP)
 c set example.com --port 4000 --no-log
 c enable example.com
 c disable example.com
@@ -80,6 +82,7 @@ c import /path/to/Caddyfile   # 导入现有配置
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
+- 通用反代网关：通过 `c add-gateway` 创建动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由
 
 ## 发行版支持
 
