@@ -239,7 +239,7 @@ cloudflare_token_can_use_dns() {
     [[ -n "$verify_response" ]] || return 1
 
     if ! CF_JSON="$verify_response" python3 - <<'PY' >/dev/null 2>&1
-import json, os, re
+import json, os
 try:
     data = json.loads(os.environ["CF_JSON"])
 except Exception:
@@ -318,6 +318,7 @@ cloudflare_site_domains() {
             for part in "${parts[@]}"; do
                 part="$(trim "$part")"
                 [[ -n "$part" ]] || continue
+                part="${part,,}"
                 case "$part" in
                     www.*) part="${part#www.}" ;;
                 esac
@@ -392,6 +393,10 @@ cmd_cloudflare() {
     esac
 
     if [[ "$action" == "set" ]]; then
+        if [[ ! "$token" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            fail "未知命令或 Token 格式错误: '$token'。用法: c cloudflare <token> | check | clear"
+            return 1
+        fi
         if ! validate_cloudflare_token "$token"; then
             fail "Cloudflare Token 不合法或无 DNS 编辑权限"
             return 1
@@ -408,6 +413,12 @@ cmd_cloudflare() {
         dropin_bak="$(mktemp "$BACKUP_DIR/cloudflare-dropin.XXXXXX")"
         cp -a "$CLOUDFLARE_SERVICE_DROPIN" "$dropin_bak"
         had_dropin=1
+    fi
+    local confd_bak="" had_confd=0
+    if [[ -f "$OPENRC_CONF_D" ]]; then
+        confd_bak="$(mktemp "$BACKUP_DIR/cloudflare-confd.XXXXXX")"
+        cp -a "$OPENRC_CONF_D" "$confd_bak"
+        had_confd=1
     fi
 
     if [[ "$action" == "set" ]]; then
@@ -433,15 +444,17 @@ cmd_cloudflare() {
         else
             rm -f "$CLOUDFLARE_SERVICE_DROPIN" 2>/dev/null || true
         fi
-        # OpenRC: restore conf.d/caddy if backed up
-        if [[ -f /etc/conf.d/caddy ]]; then
-            rm -f /etc/conf.d/caddy 2>/dev/null || true
+        # OpenRC: restore conf.d/caddy from backup
+        if (( had_confd )); then
+            cp -a "$confd_bak" "$OPENRC_CONF_D"
+        else
+            rm -f "$OPENRC_CONF_D" 2>/dev/null || true
         fi
         fix_permissions
         if service_ready; then
             svc_daemon_reload
         fi
-        cleanup_paths "$env_bak" "$dropin_bak"
+        cleanup_paths "$env_bak" "$dropin_bak" "$confd_bak"
         fail "已回滚 Cloudflare 设置"
         return 1
     fi
