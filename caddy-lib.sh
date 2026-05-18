@@ -421,23 +421,15 @@ validate_config_file() {
     if [[ -n "${LAST_VALIDATE_LOG:-}" ]]; then
         cleanup_paths "$LAST_VALIDATE_LOG"
     fi
-    LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX)"
+    LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX.log)"
     local _validate_extra_args
     _validate_extra_args="$(_hook_validate_args)"
     # Caddy < 2.7 doesn't support --envfile; source env inline
     local _caddy_ver
-    _caddy_ver="$(caddy version 2>/dev/null | sed -n 's/.*v\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
-    # Check Caddy >= 2.7 (BusyBox-safe: no grep -oP, no sort -V)
-    local _need_manual_env_source=1 _cmaj _cmin
-    if [[ -n "$_caddy_ver" ]]; then
-        _cmaj="${_caddy_ver%%.*}"
-        _cmin="${_caddy_ver#*.}"; _cmin="${_cmin%%.*}"
-        if [[ "$_cmaj" =~ ^[0-9]+$ && "$_cmin" =~ ^[0-9]+$ ]] \
-            && (( _cmaj > 2 || (_cmaj == 2 && _cmin >= 7) )); then
-            _need_manual_env_source=0
-        fi
-    fi
-    if (( _need_manual_env_source )); then
+    _caddy_ver="$(caddy version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1 || true)"
+    if [[ -n "$_caddy_ver" ]] && printf '%s\n' "$_caddy_ver" "2.7" | sort -V | head -1 | grep -q '^2\.7'; then
+        :
+    else
         if [[ "$_validate_extra_args" == *--envfile* ]]; then
             local _envf
             _envf="$(echo "$_validate_extra_args" | sed -n 's/.*--envfile *\([^ ]*\).*/\1/p')"
@@ -1052,6 +1044,88 @@ write_site_file() {
     return 0
 }
 
+# ════════════════════════ 网关站点块生成 ════════════════════════
+build_gateway_site_block() {
+    local label="$1"
+    local scheme="${2:-https}"
+
+    cat <<BLOCK
+# Emby 通用反代网关 — $label
+# 用法: ${scheme}://${label}/<上游主机:端口>/路径
+# 生成: $(date '+%F %T')
+
+${scheme}://${label} {
+    request_body {
+        max_size 500MB
+    }
+
+    handle / {
+        respond <<INFO
+OK
+
+通用反代网关 — Emby Proxy Toolbox (Caddy)
+
+使用方式：
+  ${scheme}://${label}/<上游主机:端口>/路径
+  ${scheme}://${label}/http/<上游主机:端口>/路径
+  ${scheme}://${label}/https/<上游主机:端口>/路径
+
+默认按 HTTPS 回源；若需 HTTP 回源请使用 /http 前缀。
+INFO 200
+    }
+
+    @noSlashHttp path_regexp redir_http ^/http/([A-Za-z0-9.\-_:]+)\$
+    redir @noSlashHttp /http/{re.redir_http.1}/ 308
+
+    @noSlashHttps path_regexp redir_https ^/https/([A-Za-z0-9.\-_:]+)\$
+    redir @noSlashHttps /https/{re.redir_https.1}/ 308
+
+    @httpProxy path_regexp up_http ^/http/([^/]+)(/.*)
+    handle @httpProxy {
+        rewrite * {re.up_http.2}
+        reverse_proxy {
+            to {re.up_http.1}
+            transport http
+            header_up Host {re.up_http.1}
+            flush_interval -1
+        }
+    }
+
+    @httpsProxy path_regexp up_https ^/https/([^/]+)(/.*)
+    handle @httpsProxy {
+        rewrite * {re.up_https.2}
+        reverse_proxy {
+            to {re.up_https.1}
+            transport http {
+                tls
+            }
+            header_up Host {re.up_https.1}
+            flush_interval -1
+        }
+    }
+
+    @defaultProxy {
+        path_regexp up_default ^/([^/]+)(/.*)
+        not path /http/* /https/*
+    }
+    handle @defaultProxy {
+        rewrite * {re.up_default.2}
+        reverse_proxy {
+            to {re.up_default.1}
+            transport http {
+                tls
+            }
+            header_up Host {re.up_default.1}
+            flush_interval -1
+        }
+    }
+
+    @noSlash path_regexp redir_bare ^/([A-Za-z0-9.\-_:]+)\$
+    redir @noSlash /{re.redir_bare.1}/ 308
+}
+BLOCK
+}
+
 cmd_add_emby() {
     local label="${1:-}"
     local target_domain=""
@@ -1120,6 +1194,53 @@ cmd_add_emby() {
         say "已添加 Emby 反代站点: $label -> $target_domain"
     fi
     say "注意: Emby 反代不启用 gzip 压缩（避免影响流媒体传输）"
+}
+
+cmd_add_gateway() {
+    local label="${1:-}"
+    local scheme="https"
+
+    if [[ -z "$label" ]]; then
+        read -rp "请输入网关域名: " label
+    else
+        shift $(( $# > 0 ? 1 : 0 ))
+    fi
+    label="$(trim "$label")"
+    if [[ -z "$label" ]]; then
+        fail "域名不能为空"
+        return 1
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-ssl|--http) scheme="http"; shift ;;
+            *) fail "未知参数: $1"; return 1 ;;
+        esac
+    done
+
+    local sanitized old_file new_file file site_block
+    sanitized="$(sanitize_name "$label")"
+    new_file="${SITES_DIR}/${sanitized}.conf"
+    old_file="${SITES_DIR}/${sanitized}.conf.disabled"
+
+    for file in "$new_file" "$old_file"; do
+        if [[ -s "$file" ]]; then
+            fail "配置已存在: $file"
+            say "如需修改请先 c rm $label 后再创建"
+            return 1
+        fi
+    done
+
+    site_block="$(build_gateway_site_block "$label" "$scheme")"
+    ensure_dirs
+    write_site_file "$new_file" "$label" "$site_block"
+    fix_permissions
+    if [[ "$scheme" == "http" ]]; then
+        say "已添加通用反代网关（HTTP，不申请证书）: $label"
+    else
+        say "已添加通用反代网关: $label（自动申请 Let's Encrypt 证书）"
+    fi
+    say "用法: ${scheme}://${label}/<上游主机:端口>/路径"
 }
 
 cmd_add() {
@@ -2232,6 +2353,7 @@ cmd_show_help() {
   c add <域名> <本地端口> [--http] [--path <前缀>]
   c add-static <域名> <目录> [--spa]
   c add-emby <域名> <目标地址> [--http]
+  c add-gateway <域名> [--no-ssl]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
   c rm <域名>
   c enable <域名>
@@ -2253,13 +2375,15 @@ cmd_show_help() {
   c stop
   c menu
 
-（别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby）
+（别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby, gateway=add-gateway）
 示例:
   c add example.com 3000
   c add example.com 3000 --path /api
   c add-static static.example.com /var/www/site --spa
   c add-emby emby.example.com https://10.0.0.5:8096
   c add-emby lan.example.com http://10.0.0.5:8096 --http
+  c add-gateway gate.example.com
+  c add-gateway gate.local --no-ssl
   c update
   c set example.com --port 4000
   c set emby.example.com --target https://10.0.0.6:8096
@@ -2474,11 +2598,12 @@ menu_sites() {
     echo "1. 添加反代站点"
     echo "2. 添加静态站点"
     echo "3. 添加 Emby 反代"
-    echo "4. 删除站点"
-    echo "5. 启用站点"
-    echo "6. 禁用站点"
-    echo "7. 查看站点列表"
-    echo "8. 编辑站点"
+    echo "4. 添加通用反代网关"
+    echo "5. 删除站点"
+    echo "6. 启用站点"
+    echo "7. 禁用站点"
+    echo "8. 查看站点列表"
+    echo "9. 修改站点配置"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -2633,6 +2758,7 @@ main() {
         add) shift; require_command caddy; with_global_lock run_mutation add cmd_add "$@" ;;
         add-static|static) shift; require_command caddy; with_global_lock run_mutation add-static cmd_add_static "$@" ;;
         add-emby|emby) shift; require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby "$@" ;;
+        add-gateway|gateway) shift; require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway "$@" ;;
         set) shift; require_command caddy; with_global_lock run_mutation set cmd_set "$@" ;;
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
         enable) shift; require_command caddy; with_global_lock run_mutation enable cmd_enable "${1:-}" ;;
