@@ -35,9 +35,9 @@ sudo c help     # 命令行模式
 
 ```bash
 # 站点管理
-c add example.com 3000 --www --log
-c add example.com 3000 --path /api --log
-c add-static static.example.com /var/www/site --www --spa
+c add example.com 3000
+c add example.com 3000 --path /api
+c add-static static.example.com /var/www/site --spa
 c add-gateway gate.example.com           # 通用反代网关 (HTTPS)
 c add-gateway gate.local --no-ssl        # 通用反代网关 (HTTP)
 c set example.com --port 4000 --no-log

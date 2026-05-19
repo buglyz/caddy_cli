@@ -1022,8 +1022,7 @@ write_site_file() {
         return 1
     }
 
-    printf '%s\n
-' "$content" > "$file"
+    printf '%s\n' "$content" > "$file"
     chmod 644 "$file"
     chown root:caddy "$file" 2>/dev/null || true
 
@@ -1127,35 +1126,31 @@ BLOCK
 }
 
 cmd_add_emby() {
-    local label="${1:-}"
+    local label=""
     local target_domain=""
     local scheme="https"
+    local -a positional=()
 
-    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --http) scheme="http" ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 add-emby 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    label="${positional[0]:-}"
+    target_domain="${positional[1]:-}"
+
     if [[ -z "$label" ]]; then
         read -rp "请输入你的域名: " label
-    else
-        shift $(( $# > 0 ? 1 : 0 ))
     fi
     label="$(trim "$label")"
     if [[ -z "$label" ]]; then
         fail "域名不能为空"
         return 1
     fi
-
-    # Parse remaining args
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --http) scheme="http"; shift ;;
-            *)
-                if [[ -z "$target_domain" ]]; then
-                    target_domain="$1"; shift
-                else
-                    fail "未知参数: $1"; return 1
-                fi
-                ;;
-        esac
-    done
 
     if [[ -z "$target_domain" ]]; then
         read -rp "请输入目标 Emby 服务器地址（如 https://emby.example.com:443）: " target_domain
@@ -1197,26 +1192,29 @@ cmd_add_emby() {
 }
 
 cmd_add_gateway() {
-    local label="${1:-}"
+    local label=""
     local scheme="https"
+    local -a positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-ssl|--http) scheme="http" ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 add-gateway 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    label="${positional[0]:-}"
 
     if [[ -z "$label" ]]; then
         read -rp "请输入网关域名: " label
-    else
-        shift $(( $# > 0 ? 1 : 0 ))
     fi
     label="$(trim "$label")"
     if [[ -z "$label" ]]; then
         fail "域名不能为空"
         return 1
     fi
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --no-ssl|--http) scheme="http"; shift ;;
-            *) fail "未知参数: $1"; return 1 ;;
-        esac
-    done
 
     local sanitized old_file new_file file site_block
     sanitized="$(sanitize_name "$label")"
@@ -1244,12 +1242,11 @@ cmd_add_gateway() {
 }
 
 cmd_add() {
-    local label="${1:-}"
-    local port="${2:-}"
+    local label=""
+    local port=""
     local scheme="https"
     local path_prefix=""
-
-    shift $(( $# > 2 ? 2 : $# ))
+    local -a positional=()
 
     while (( $# > 0 )); do
         case "$1" in
@@ -1260,10 +1257,14 @@ cmd_add() {
                 [[ $# -gt 0 ]] || { fail "--path 需要一个前缀"; return 1; }
                 path_prefix="$1"
                 ;;
-            *) fail "未知 add 参数: $1"; return 1 ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 add 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
         esac
         shift
     done
+    label="${positional[0]:-}"
+    port="${positional[1]:-}"
 
     if [[ -z "$label" ]]; then
         read -rp "站点地址（如 example.com 或 example.com, api.example.com）: " label
@@ -1314,19 +1315,22 @@ cmd_add() {
 }
 
 cmd_add_static() {
-    local label="${1:-}"
-    local site_dir="${2:-}"
+    local label=""
+    local site_dir=""
     local spa_mode="off"
-
-    shift $(( $# > 2 ? 2 : $# ))
+    local -a positional=()
 
     while (( $# > 0 )); do
         case "$1" in
             --spa) spa_mode="on" ;;
-            *) fail "未知 add-static 参数: $1"; return 1 ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 add-static 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
         esac
         shift
     done
+    label="${positional[0]:-}"
+    site_dir="${positional[1]:-}"
 
     if [[ -z "$label" ]]; then
         read -rp "站点地址（如 static.example.com）: " label
@@ -1440,13 +1444,12 @@ cmd_set_emby() {
 }
 
 cmd_set() {
-    local query="${1:-}"
+    local query=""
     local override_port=""
     local override_path="__keep__"
     local override_scheme=""
     local override_emby_target=""
-
-    shift $(( $# > 0 ? 1 : 0 ))
+    local -a positional=()
 
     while (( $# > 0 )); do
         case "$1" in
@@ -1467,10 +1470,13 @@ cmd_set() {
                 ;;
             --http) override_scheme="http" ;;
             --https) override_scheme="https" ;;
-            *) fail "未知 set 参数: $1"; return 1 ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 set 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
         esac
         shift
     done
+    query="${positional[0]:-}"
 
     if [[ -z "$query" ]]; then
         read -rp "输入要编辑的站点地址: " query
@@ -1622,8 +1628,6 @@ detect_site_type() {
     local file="$1"
     if grep -q '通用反代网关' "$file" 2>/dev/null; then
         echo "网关"
-    elif grep -q 'Emby 流媒体反代' "$file" 2>/dev/null; then
-        echo "Emby反代"
     elif grep -Eq '^[[:space:]]*file_server([[:space:]]|$)' "$file"; then
         echo "静态站点"
     elif grep -Eq '^[[:space:]]*@path_.* path ' "$file" && grep -Eq '^[[:space:]]*uri strip_prefix ' "$file"; then

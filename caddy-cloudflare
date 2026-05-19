@@ -72,7 +72,7 @@ _hook_menu_config_items() {
 
 _hook_menu_config_handler() {
     case "$1" in
-        10) require_command caddy; with_global_lock run_mutation cloudflare cmd_cloudflare ;;
+        10) require_command caddy; with_global_lock cmd_cloudflare ;;
         *) return 1 ;;
     esac
 }
@@ -82,7 +82,14 @@ _hook_cli_command() {
         cloudflare|cf)
             shift
             require_command caddy
-            with_global_lock run_mutation cloudflare cmd_cloudflare "${1:-}"
+            case "${1:-}" in
+                ""|status|show|check)
+                    with_global_lock cmd_cloudflare "${1:-}"
+                    ;;
+                *)
+                    with_global_lock run_mutation cloudflare cmd_cloudflare "${1:-}"
+                    ;;
+            esac
             ;;
         *) return 1 ;;
     esac
@@ -137,10 +144,11 @@ validate_cloudflare_token() {
     [[ "$token" != *" "* ]] || return 1
 
     if ! command_exists curl; then
-        return 1
+        fail "未安装 curl，无法验证 Cloudflare Token"
+        return 2
     fi
 
-    cloudflare_token_can_use_dns "$token"
+    cloudflare_token_is_active "$token"
 }
 
 cloudflare_env_configured() {
@@ -216,8 +224,7 @@ cloudflare_domain_candidates() {
     fi
 
     for (( i=0; i<=${#parts[@]}-2; i++ )); do
-        candidate="${parts[@]:i}"
-        candidate="${candidate// /.}"
+        candidate="$(IFS='.'; printf '%s' "${parts[*]:i}")"
         [[ -n "$candidate" ]] || continue
         printf '%s\n' "$candidate"
     done
@@ -232,7 +239,9 @@ cloudflare_api_get() {
         "$url"
 }
 
-cloudflare_token_can_use_dns() {
+cloudflare_token_is_active() {
+    # 仅验证 token 已激活；token 是否拥有具体 zone 的 DNS 编辑权限
+    # 需配合 cloudflare_domain_accessible_with_token 检查
     local token="$1"
     local verify_response
 
@@ -304,6 +313,7 @@ PY
 
 cloudflare_site_domains() {
     local file header part
+    local -a parts=()
     shopt -s nullglob
     local files=("$SITES_DIR"/*.conf)
     for file in "${files[@]}"; do
@@ -333,10 +343,11 @@ cloudflare_site_domains() {
 
 cloudflare_dns_ready() {
     local token domain
+    local -a domains=()
 
     token="$(cloudflare_env_token_value)" || return 1
 
-    if ! cloudflare_token_can_use_dns "$token"; then
+    if ! cloudflare_token_is_active "$token"; then
         return 1
     fi
 
@@ -372,8 +383,14 @@ cmd_cloudflare() {
             if [[ -f "$CLOUDFLARE_ENV_FILE" ]]; then
                 say "Cloudflare Token: 已设置"
                 token_value="$(cloudflare_env_token_value 2>/dev/null || true)"
-                if [[ -n "$token_value" ]] && validate_cloudflare_token "$token_value"; then
-                    say "Cloudflare Token 权限: 有效"
+                if [[ -n "$token_value" ]]; then
+                    local _rc=0
+                    validate_cloudflare_token "$token_value" || _rc=$?
+                    case "$_rc" in
+                        0) say "Cloudflare Token 权限: 有效" ;;
+                        2) say "Cloudflare Token 权限: 未知（缺 curl）" ;;
+                        *) say "Cloudflare Token 权限: 无效或不足" ;;
+                    esac
                 else
                     say "Cloudflare Token 权限: 无效或不足"
                 fi
@@ -398,10 +415,13 @@ cmd_cloudflare() {
             fail "未知命令或 Token 格式错误: '$token'。用法: c cloudflare <token> | check | clear"
             return 1
         fi
-        if ! validate_cloudflare_token "$token"; then
-            fail "Cloudflare Token 不合法或无 DNS 编辑权限"
-            return 1
-        fi
+        local _rc=0
+        validate_cloudflare_token "$token" || _rc=$?
+        case "$_rc" in
+            0) ;;
+            2) return 1 ;;   # curl 缺失，验证函数已打印
+            *) fail "Cloudflare Token 不合法或无 DNS 编辑权限"; return 1 ;;
+        esac
     fi
 
     ensure_cloudflare_service_dropin
