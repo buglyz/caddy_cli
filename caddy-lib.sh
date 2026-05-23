@@ -496,7 +496,12 @@ _svc_with_timeout() {
     local cmd="$1"; shift
     if [[ "$SVC_BACKEND" == "systemd" ]] && command_exists timeout; then
         local to=$(get_systemctl_timeout_seconds) rc
-        if timeout --foreground "${to}s" systemctl "$cmd" caddy "$@"; then return 0; fi
+        # BusyBox timeout lacks --foreground; detect and skip when unavailable
+        local _fg_opt=""
+        if timeout --foreground 0 true 2>/dev/null; then
+            _fg_opt="--foreground"
+        fi
+        if timeout $_fg_opt "${to}s" systemctl "$cmd" caddy "$@"; then return 0; fi
         rc=$?
         (( rc == 124 )) && fail "systemctl $cmd 超时（${to}s）" || fail "systemctl $cmd 执行失败"
         return "$rc"

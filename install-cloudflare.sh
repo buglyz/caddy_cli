@@ -176,6 +176,7 @@ install_alpine_init_script() {
         return 0
     fi
     log "Creating OpenRC init script for Caddy..."
+    mkdir -p /etc/init.d
     cat > /etc/init.d/caddy <<'INITEOF'
 #!/sbin/openrc-run
 name="caddy"
@@ -226,6 +227,7 @@ prepare_layout_alpine() {
     chmod 644 /etc/caddy/caddyctl.conf
 
     # OpenRC: source cloudflare env from conf.d
+    mkdir -p /etc/conf.d
     if [[ ! -f "$OPENRC_CONF_D" ]]; then
         cat > "$OPENRC_CONF_D" <<'EOF'
 # Managed by caddyctl
