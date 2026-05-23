@@ -421,12 +421,12 @@ validate_config_file() {
     if [[ -n "${LAST_VALIDATE_LOG:-}" ]]; then
         cleanup_paths "$LAST_VALIDATE_LOG"
     fi
-    LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX.log)"
+    LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX)"
     local _validate_extra_args
     _validate_extra_args="$(_hook_validate_args)"
     # Caddy < 2.7 doesn't support --envfile; source env inline
     local _caddy_ver
-    _caddy_ver="$(caddy version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1 || true)"
+    _caddy_ver="$(caddy version 2>/dev/null | sed -n 's/^v\?\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
     if [[ -n "$_caddy_ver" ]] && printf '%s\n' "$_caddy_ver" "2.7" | sort -V | head -1 | grep -q '^2\.7'; then
         :
     else
