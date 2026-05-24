@@ -101,7 +101,7 @@ install_or_keep_caddy_debian() {
 install_deps_alpine() {
     log "[1/4] Installing dependencies (Alpine)..."
     apk update
-    apk add --no-cache ca-certificates curl gnupg python3
+    apk add --no-cache bash ca-certificates curl gnupg python3
 }
 
 enable_community_repo() {

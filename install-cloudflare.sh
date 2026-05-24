@@ -222,13 +222,13 @@ ensure_caddy_user() {
 install_deps_alpine() {
     log "[1/5] Installing dependencies (Alpine)..."
     apk update
-    apk add --no-cache ca-certificates curl gnupg python3
+    apk add --no-cache bash ca-certificates curl gnupg python3
 }
 
 install_build_deps_alpine() {
     log "[build] Installing build dependencies (Alpine)..."
     apk update
-    apk add --no-cache ca-certificates curl gnupg git go python3
+    apk add --no-cache bash ca-certificates curl gnupg git go python3
 }
 
 prepare_layout_alpine() {

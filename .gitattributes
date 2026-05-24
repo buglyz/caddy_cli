@@ -1,0 +1,4 @@
+.gitattributes text eol=lf
+*.sh text eol=lf
+caddy-cloudflare text eol=lf
+emby-gateway text eol=lf

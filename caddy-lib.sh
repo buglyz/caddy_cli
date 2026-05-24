@@ -555,6 +555,26 @@ svc_unit_exists() {
 svc_backend_name() { detect_svc_backend; echo "${SVC_BACKEND:-无}"; }
 
 
+acquire_flock() {
+    local fd="$1"
+    local wait_seconds="$2"
+    local elapsed=0
+
+    if flock -w 0 "$fd" 2>/dev/null; then
+        return 0
+    fi
+
+    while (( elapsed < wait_seconds )); do
+        if flock -n "$fd" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
 with_global_lock() {
     local wait_seconds fd rc
     wait_seconds="$(get_lock_wait_seconds)"
@@ -576,7 +596,7 @@ with_global_lock() {
 
     mkdir -p "$(dirname "$LOCK_FILE")"
     exec {fd}> "$LOCK_FILE"
-    if ! flock -w "$wait_seconds" "$fd"; then
+    if ! acquire_flock "$fd" "$wait_seconds"; then
         fail "获取全局操作锁超时（${wait_seconds}s），请稍后重试。"
         exec {fd}>&-
         return 1
