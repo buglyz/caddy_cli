@@ -35,6 +35,7 @@ _hook_cmd_doctor() { :; }
 _hook_help_extra() { :; }
 _hook_list_extra() { :; }
 _hook_render_global_options() { :; }
+_hook_render_site_tls() { :; }
 _hook_validate_args() { printf '%s' ''; }
 
 say() {
@@ -893,9 +894,13 @@ get_primary_label() {
 }
 
 emit_site_common_blocks() {
+    local emit_tls="${1:-yes}"
     cat <<'EOF'
     encode zstd gzip
 EOF
+    if [[ "$emit_tls" != "no" ]]; then
+        _hook_render_site_tls
+    fi
 }
 
 build_reverse_proxy_site_block() {
@@ -906,13 +911,14 @@ build_reverse_proxy_site_block() {
     cat <<EOF
 $label {
 EOF
-    emit_site_common_blocks
     if [[ "$scheme" == "http" ]]; then
+        emit_site_common_blocks no
         cat <<EOF
     reverse_proxy http://127.0.0.1:$port
 }
 EOF
     else
+        emit_site_common_blocks
         cat <<EOF
     reverse_proxy 127.0.0.1:$port
 }
@@ -932,7 +938,11 @@ build_path_proxy_site_block() {
     cat <<EOF
 $label {
 EOF
-    emit_site_common_blocks
+    if [[ "$scheme" == "http" ]]; then
+        emit_site_common_blocks no
+    else
+        emit_site_common_blocks
+    fi
     cat <<EOF
     $matcher_name path $path_prefix $path_prefix/*
     handle $matcher_name {
@@ -1251,12 +1261,14 @@ cmd_add() {
     local port=""
     local scheme="https"
     local path_prefix=""
+    local force_dns_tls=0
     local -a positional=()
 
     while (( $# > 0 )); do
         case "$1" in
             --http) scheme="http" ;;
             --https) scheme="https" ;;
+            --dns-only) force_dns_tls=1 ;;
             --path)
                 shift
                 [[ $# -gt 0 ]] || { fail "--path 需要一个前缀"; return 1; }
@@ -1301,11 +1313,16 @@ cmd_add() {
     file="$(site_path_for_label "$label")"
     oldbak="$(backup_file_if_exists "$file")"
 
+    # --dns-only: force DNS-01 even if cloudflare_dns_ready check fails
+    FORCE_DNS_TLS="$force_dns_tls"
+
     if [[ -n "$path_prefix" ]]; then
         build_path_proxy_site_block "$label" "$port" "$path_prefix" "$scheme" > "$file"
     else
         build_reverse_proxy_site_block "$label" "$port" "$scheme" > "$file"
     fi
+
+    FORCE_DNS_TLS=0
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
         fail "已回滚站点修改"
@@ -2149,8 +2166,12 @@ cmd_cert_check() {
         echo
         echo "===== 最近证书相关日志（最多20行） ====="
         journalctl -u caddy -n 300 --no-pager 2>/dev/null | grep -Ei 'acme|certificate|tls|challenge|issuer' | tail -n 20 || true
+    elif [[ -f /var/log/caddy/caddy.log ]]; then
+        echo
+        echo "===== 最近证书相关日志（最多20行） ====="
+        grep -Ei 'acme|certificate|tls|challenge|issuer' /var/log/caddy/caddy.log 2>/dev/null | tail -n 20 || true
     else
-        echo "[WARN] 缺少 journalctl，跳过日志诊断"
+        echo "[WARN] 缺少 journalctl 和日志文件，跳过日志诊断"
     fi
 }
 
@@ -2366,7 +2387,7 @@ cmd_show_help() {
   c install-self
   c update
   c doctor
-  c add <域名> <本地端口> [--http] [--path <前缀>]
+  c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only]
   c add-static <域名> <目录> [--spa]
   c add-emby <域名> <目标地址> [--http]
   c add-gateway <域名> [--no-ssl]
@@ -2395,6 +2416,7 @@ cmd_show_help() {
 示例:
   c add example.com 3000
   c add example.com 3000 --path /api
+  c add example.com 3000 --dns-only
   c add-static static.example.com /var/www/site --spa
   c add-emby emby.example.com https://10.0.0.5:8096
   c add-emby lan.example.com http://10.0.0.5:8096 --http

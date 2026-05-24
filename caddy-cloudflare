@@ -58,6 +58,20 @@ _hook_render_global_options() {
     fi
 }
 
+_hook_render_site_tls() {
+    # When Cloudflare DNS is configured, force DNS-01 challenge per site.
+    # Without this block, Caddy still prefers tls-alpn-01 / http-01 which
+    # often fail on servers behind NAT or firewalled ISPs.
+    # --dns-only flag bypasses cloudflare_env_configured check.
+    if [[ "${FORCE_DNS_TLS:-0}" == "1" ]] || cloudflare_env_configured; then
+        cat <<'EOF'
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+EOF
+    fi
+}
+
 _hook_validate_args() {
     if cloudflare_env_configured; then
         printf '%s' "--envfile $CLOUDFLARE_ENV_FILE"
@@ -248,31 +262,29 @@ cloudflare_token_is_active() {
     verify_response="$(cloudflare_api_get "$token" "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || true)"
     [[ -n "$verify_response" ]] || return 1
 
-    if ! CF_JSON="$verify_response" python3 - <<'PY' >/dev/null 2>&1
-import json, os
-try:
-    data = json.loads(os.environ["CF_JSON"])
-except Exception:
-    raise SystemExit(1)
-if not data.get("success"):
-    raise SystemExit(1)
-if data.get("result", {}).get("status") != "active":
-    raise SystemExit(1)
-PY
-    then
-        return 1
-    fi
+    # Pure-bash JSON field extraction (no python3/jq dependency)
+    # Response: {"success":true,"result":{"status":"active",...},...}
+    local success status
+    success="$(printf '%s' "$verify_response" | sed -n 's/.*"success"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/p' | head -1)"
+    status="$(printf '%s' "$verify_response" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+
+    [[ "$success" == "true" ]] || return 1
+    [[ "$status" == "active" ]] || return 1
 
     return 0
 }
 
 cloudflare_domain_resolves_via_cloudflare() {
     local domain="$1"
-    if ! command_exists dig; then
-        return 1
-    fi
-    if dig +short NS "$domain" 2>/dev/null | tr 'A-Z' 'a-z' | grep -q 'cloudflare.com'; then
-        return 0
+    if command_exists dig; then
+        if dig +short NS "$domain" 2>/dev/null | tr 'A-Z' 'a-z' | grep -q 'cloudflare.com'; then
+            return 0
+        fi
+    elif command_exists nslookup; then
+        # BusyBox nslookup fallback (no dig required)
+        if nslookup -type=NS "$domain" 2>/dev/null | tr 'A-Z' 'a-z' | grep -q 'cloudflare.com'; then
+            return 0
+        fi
     fi
     return 1
 }
@@ -293,19 +305,13 @@ cloudflare_domain_accessible_with_token() {
             -H "Authorization: Bearer $token" \
             -H "Content-Type: application/json" 2>/dev/null || true)"
         [[ -n "$resp" ]] || continue
-        if CF_JSON="$resp" python3 - <<'PY' >/dev/null 2>&1
-import json, os
-try:
-    data = json.loads(os.environ["CF_JSON"])
-except Exception:
-    raise SystemExit(1)
-if data.get("success") and data.get("result"):
-    raise SystemExit(0)
-raise SystemExit(1)
-PY
-        then
-            return 0
-        fi
+        # Pure-bash JSON field extraction (no python3/jq dependency)
+        # Response: {"success":true,"result":[{"id":"..."}],...}
+        local cf_success cf_result
+        cf_success="$(printf '%s' "$resp" | sed -n 's/.*"success"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/p' | head -1)"
+        cf_result="$(printf '%s' "$resp" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | head -1)"
+
+        [[ "$cf_success" == "true" ]] && [[ -n "$cf_result" ]] && return 0
     done < <(cloudflare_domain_candidates "$domain")
 
     return 1

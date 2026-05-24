@@ -54,6 +54,19 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
 }
 
+# Portable download: prefers curl, falls back to wget (BusyBox compatible)
+safe_download() {
+    local url="$1"
+    local output="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 --max-time 120 "$url" -o "$output"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 120 -O "$output" "$url"
+    else
+        die "Neither curl nor wget available; install one to continue"
+    fi
+}
+
 # ── Debian ──────────────────────────────────────────────
 
 install_deps_debian() {
@@ -103,11 +116,9 @@ download_caddy_from_repo() {
     local tmp
     tmp="$(mktemp)"
 
-    if ! curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 15 --max-time 120 \
-        "$CADDY_RAW_URL" -o "$tmp" 2>/dev/null; then
+    if ! safe_download "$CADDY_RAW_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
         log "GitHub raw slow, trying jsDelivr CDN..."
-        curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 15 --max-time 120 \
-            "https://cdn.jsdelivr.net/gh/buglyz/caddy_cli@main/caddy" -o "$tmp" \
+        safe_download "https://cdn.jsdelivr.net/gh/buglyz/caddy_cli@main/caddy" "$tmp" \
             || die "Download failed: $CADDY_RAW_URL"
     fi
 
@@ -267,7 +278,7 @@ install_cli_cf() {
 
     local tmp_lib
     tmp_lib="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
+    safe_download "$LIB_URL" "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
     bash -n "$tmp_lib"
     install -m 0644 "$tmp_lib" "$LIB_BIN"
@@ -275,7 +286,7 @@ install_cli_cf() {
 
     local tmp_cli
     tmp_cli="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$CADDY_CF_URL" -o "$tmp_cli"
+    safe_download "$CADDY_CF_URL" "$tmp_cli"
     [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CADDY_CF_URL"
     bash -n "$tmp_cli"
     install -m 0755 "$tmp_cli" "$CLI_BIN"
@@ -286,7 +297,10 @@ install_cli_cf() {
 
 install_debian() {
     require_command apt-get
-    require_command curl
+    # curl or wget needed for downloads
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        die "Neither curl nor wget available; install one to continue"
+    fi
 
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
 
@@ -315,7 +329,10 @@ install_debian() {
 
 install_alpine() {
     require_command apk
-    require_command curl
+    # curl or wget needed for downloads (Alpine may only have BusyBox wget)
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        die "Neither curl nor wget available; install one to continue"
+    fi
 
     log "Starting Caddy Cloudflare installer (Alpine Linux)..."
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
