@@ -1,0 +1,49 @@
+name: Shell checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Bash syntax and ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Bash syntax check
+        run: |
+          set -euo pipefail
+          scripts=(
+            caddy-lib.sh
+            caddy.sh
+            caddy-cloudflare.sh
+            install.sh
+            install-cloudflare.sh
+            caddy-cloudflare
+            emby-gateway
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+
+      - name: ShellCheck
+        run: |
+          shellcheck \
+            caddy-lib.sh \
+            caddy.sh \
+            caddy-cloudflare.sh \
+            install.sh \
+            install-cloudflare.sh \
+            caddy-cloudflare \
+            emby-gateway
