@@ -285,12 +285,12 @@ cloudflare_token_is_active() {
 cloudflare_domain_resolves_via_cloudflare() {
     local domain="$1"
     if command_exists dig; then
-        if dig +short NS "$domain" 2>/dev/null | tr 'A-Z' 'a-z' | grep -q 'cloudflare.com'; then
+        if dig +short NS "$domain" 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -q 'cloudflare.com'; then
             return 0
         fi
     elif command_exists nslookup; then
         # BusyBox nslookup fallback (no dig required)
-        if nslookup -type=NS "$domain" 2>/dev/null | tr 'A-Z' 'a-z' | grep -q 'cloudflare.com'; then
+        if nslookup -type=NS "$domain" 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -q 'cloudflare.com'; then
             return 0
         fi
     fi

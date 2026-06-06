@@ -112,7 +112,11 @@ build_caddy_with_cloudflare() {
 
 download_caddy_from_repo() {
     local step_label="${1:-}"
-    [[ -n "$step_label" ]] && log "[${step_label}] Downloading pre-built Caddy from repo..." || log "Downloading pre-built Caddy from repo..."
+    if [[ -n "$step_label" ]]; then
+        log "[${step_label}] Downloading pre-built Caddy from repo..."
+    else
+        log "Downloading pre-built Caddy from repo..."
+    fi
     local tmp
     tmp="$(mktemp)"
 
