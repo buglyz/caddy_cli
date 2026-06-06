@@ -1837,7 +1837,7 @@ cmd_list() {
     else
         for f in "${sfiles[@]}"; do
             echo "---- $(basename "$f") [$(detect_site_type "$f") / $(site_file_status "$f")] ----"
-            echo "$(site_summary "$f")"
+            site_summary "$f"
             sed -n '1,80p' "$f"
             echo
         done
@@ -1853,7 +1853,7 @@ cmd_list() {
     else
         for f in "${disabled_files[@]}"; do
             echo "---- $(basename "$f") [$(detect_site_type "$f") / $(site_file_status "$f")] ----"
-            echo "$(site_summary "$f")"
+            site_summary "$f"
             sed -n '1,80p' "$f"
             echo
         done

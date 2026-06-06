@@ -134,7 +134,6 @@ ROUTES
 )
 
 if [[ "$NO_SSL" -eq 1 ]]; then
-    SCHEME="http"
     cat > "$CONF_FILE" <<CADDY
 # Emby 通用反代网关 (HTTP)
 # 域名: ${DOMAIN}
@@ -146,7 +145,6 @@ $(echo "$ROUTES" | sed "s|__SCHEME__|http|g; s|__DOMAIN__|${DOMAIN}|g")
 CADDY
 
 else
-    SCHEME="https"
     cat > "$CONF_FILE" <<CADDY
 # Emby 通用反代网关 (HTTPS)
 # 域名: ${DOMAIN}
