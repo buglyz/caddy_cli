@@ -66,10 +66,9 @@ c import /path/to/Caddyfile   # 导入现有配置
 ## Cloudflare DNS 版额外功能
 
 - 自动通过 DNS-01 challenge 申请 Let's Encrypt 证书（支持泛域名 `*.example.com`）
-- `c cf-env` — 配置 Cloudflare API token
-- `c cf-clear-cache` — 清除 Cloudflare 缓存
-- `c cf-purge-files` — 按 URL 清除缓存文件
-- `c cf-zones` — 列出所有域名
+- `c cloudflare set` — 配置 Cloudflare API token（交互式隐藏输入；脚本环境可通过 stdin 传入）
+- `c cloudflare check` — 检查 Cloudflare DNS-01 就绪状态
+- `c cloudflare remove` — 删除 Cloudflare 配置
 
 ## 功能特性
 
@@ -121,5 +120,5 @@ c cert-check your-domain.com
 
 - 需要 `root/sudo` 运行
 - 如果系统没有 service manager（systemd / OpenRC），脚本只写配置，不会自动重载服务
-- Cloudflare DNS 版需要先运行 `c cloudflare <token>` 配置 API token
+- Cloudflare DNS 版需要先运行 `c cloudflare set` 配置 API token
 - **不要手动编辑 `/etc/caddy/Caddyfile`**，它由脚本从 `sites.d/` 和 `globals.d/` 自动生成

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # caddy-cloudflare.sh — Cloudflare DNS-01 版本
-# 用法: sudo c cloudflare <token>
+# 用法: sudo c cloudflare set
 
 DEFAULT_UPDATE_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-cloudflare"
 
@@ -100,6 +100,14 @@ _hook_cli_command() {
                 ""|status|show|check)
                     with_global_lock cmd_cloudflare "${1:-}"
                     ;;
+                set)
+                    shift
+                    if [[ $# -gt 0 ]]; then
+                        fail "请不要把 Token 作为命令参数传入。用法: c cloudflare set"
+                        return 1
+                    fi
+                    with_global_lock run_mutation cloudflare cmd_cloudflare set
+                    ;;
                 *)
                     with_global_lock run_mutation cloudflare cmd_cloudflare "${1:-}"
                     ;;
@@ -131,9 +139,9 @@ _hook_cmd_doctor() {
 
 _hook_help_extra() {
     cat <<'EOF'
-  c cloudflare <token>      配置 Cloudflare API Token
-  c cloudflare check        检查 Cloudflare DNS 就绪状态
-  c cloudflare remove       删除 Cloudflare 配置
+  c cloudflare set        配置 Cloudflare API Token（隐藏输入）
+  c cloudflare check      检查 Cloudflare DNS 就绪状态
+  c cloudflare remove     删除 Cloudflare 配置
 EOF
 }
 
@@ -385,6 +393,14 @@ cmd_cloudflare() {
     local token_value
 
     case "$token" in
+        set)
+            if [[ -t 0 ]]; then
+                read -rsp "Cloudflare API Token: " token
+                printf '\n'
+            else
+                IFS= read -r token || token=""
+            fi
+            ;;
         ""|status|show|check)
             if [[ -f "$CLOUDFLARE_ENV_FILE" ]]; then
                 say "Cloudflare Token: 已设置"
@@ -418,7 +434,7 @@ cmd_cloudflare() {
 
     if [[ "$action" == "set" ]]; then
         if [[ ! "$token" =~ ^[A-Za-z0-9_-]+$ ]]; then
-            fail "未知命令或 Token 格式错误: '$token'。用法: c cloudflare <token> | check | clear"
+            fail "未知命令或 Token 格式错误。用法: c cloudflare set | check | remove"
             return 1
         fi
         local _rc=0

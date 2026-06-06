@@ -322,7 +322,7 @@ install_debian() {
     log "Install complete."
     log "--------------------------------"
     log "c doctor            检查环境"
-    log "c cloudflare <token>  设置 Cloudflare Token"
+    log "c cloudflare set      设置 Cloudflare Token"
     log "c cloudflare check    检查 DNS-01 就绪"
     log "--------------------------------"
 }
@@ -368,7 +368,7 @@ install_alpine() {
     log "Install complete."
     log "--------------------------------"
     log "c doctor            检查环境"
-    log "c cloudflare <token>  设置 Cloudflare Token"
+    log "c cloudflare set      设置 Cloudflare Token"
     log "c cloudflare check    检查 DNS-01 就绪"
     log "--------------------------------"
 }

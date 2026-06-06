@@ -95,6 +95,15 @@ get_lock_wait_seconds() {
     fi
 }
 
+caddy_supports_envfile() {
+    local version="$1"
+    local major minor
+    [[ "$version" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 1
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    (( 10#$major > 2 || (10#$major == 2 && 10#$minor >= 7) ))
+}
+
 strip_wrapping_quotes() {
     local value="$1"
     if (( ${#value} >= 2 )); then
@@ -428,7 +437,7 @@ validate_config_file() {
     # Caddy < 2.7 doesn't support --envfile; source env inline
     local _caddy_ver
     _caddy_ver="$(caddy version 2>/dev/null | sed -n 's/^v\?\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
-    if [[ -n "$_caddy_ver" ]] && printf '%s\n' "$_caddy_ver" "2.7" | sort -V | head -1 | grep -q '^2\.7'; then
+    if [[ -n "$_caddy_ver" ]] && caddy_supports_envfile "$_caddy_ver"; then
         :
     else
         if [[ "$_validate_extra_args" == *--envfile* ]]; then
@@ -2251,7 +2260,8 @@ cmd_install_self() {
     target_bin="/usr/local/bin/caddyctl"
     target_alias="/usr/local/bin/c"
 
-    install -Dm755 "$src" "$target_bin"
+    install -d -m 0755 "$(dirname "$target_bin")"
+    install -m 0755 "$src" "$target_bin"
     ln -sf "$target_bin" "$target_alias"
 
     say "已安装脚本命令:"
@@ -2290,7 +2300,8 @@ cmd_update() {
         fail "下载脚本语法校验失败，已中止更新。"
         return 1
     fi
-    install -Dm755 "$tmp" "$target_bin"
+    install -d -m 0755 "$(dirname "$target_bin")"
+    install -m 0755 "$tmp" "$target_bin"
     ln -sf "$target_bin" "$target_alias"
     cleanup_paths "$tmp"
 
@@ -2312,7 +2323,8 @@ cmd_update() {
         fail "共享库语法校验失败，已中止。"
         return 1
     fi
-    install -Dm644 "$tmp_lib" "$lib_bin"
+    install -d -m 0755 "$(dirname "$lib_bin")"
+    install -m 0644 "$tmp_lib" "$lib_bin"
     cleanup_paths "$tmp_lib"
 
     say "更新完成:"
