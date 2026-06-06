@@ -1,6 +1,6 @@
 # Caddy CLI 管理脚本
 
-一个面向服务器运维的 Caddy 管理脚本集合，采用**共享库 + 前端**架构，消除重复代码。支持 **Debian/Ubuntu** 和 **Alpine Linux**。
+一个面向服务器运维的 Caddy 管理脚本集合，采用**共享库 + 前端**架构，消除重复代码。支持 **Debian/Ubuntu** 和 **Alpine Linux**，需要 **Bash 4.0+**。
 
 | 文件 | 说明 |
 |------|------|

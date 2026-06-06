@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+    printf '%s\n' "错误: 需要 Bash 4.0+，当前: ${BASH_VERSION:-unknown}" >&2
+    exit 1
+fi
+
 # Clean up on exit
 trap 'cleanup_paths "${LAST_VALIDATE_LOG:-}"' EXIT
 
@@ -42,15 +47,15 @@ _hook_render_site_tls() { :; }
 _hook_validate_args() { printf '%s' ''; }
 
 say() {
-    echo "$*"
+    printf '%s\n' "$*"
 }
 
 fail() {
-    echo "错误: $*" >&2
+    printf '错误: %s\n' "$*" >&2
 }
 
 log_ok() {
-    echo -e "$*"
+    printf '%b\n' "$*"
 }
 
 trim() {

@@ -27,18 +27,18 @@ detect_distro() {
 }
 
 log() {
-    echo "$*"
+    printf '%s\n' "$*"
 }
 
 die() {
-    echo "Error: $*" >&2
+    printf 'Error: %s\n' "$*" >&2
     exit 1
 }
 
 on_error() {
     local exit_code="$?"
     local line_no="${1:-unknown}"
-    echo "Error: install failed (exit=${exit_code}, line=${line_no})" >&2
+    printf 'Error: install failed (exit=%s, line=%s)\n' "$exit_code" "$line_no" >&2
     exit "$exit_code"
 }
 
