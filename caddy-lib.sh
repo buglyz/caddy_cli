@@ -17,8 +17,11 @@ MAX_SYSTEMCTL_TIMEOUT="600"
 DEFAULT_LOCK_WAIT_SECONDS="30"
 LOCK_FILE="/run/lock/caddyctl.lock"
 LOCK_HELD=0
+# shellcheck disable=SC2034 # reserved defaults for generated Caddy access-log roll policy
 ACCESS_LOG_ROLL_SIZE="20MiB"
+# shellcheck disable=SC2034 # reserved defaults for generated Caddy access-log roll policy
 ACCESS_LOG_ROLL_KEEP="10"
+# shellcheck disable=SC2034 # reserved defaults for generated Caddy access-log roll policy
 ACCESS_LOG_ROLL_KEEP_FOR="720h"
 DEFAULT_UPSTREAM_CHECK_MODE="warn"
 SNAPSHOT_DIR="$BACKUP_DIR/snapshots"
@@ -444,7 +447,10 @@ validate_config_file() {
             local _envf
             _envf="$(echo "$_validate_extra_args" | sed -n 's/.*--envfile *\([^ ]*\).*/\1/p')"
             if [[ -f "$_envf" ]]; then
-                set -a; source "$_envf" 2>/dev/null || true; set +a
+                set -a
+                # shellcheck disable=SC1090 # env file path is discovered from validated hook args
+                source "$_envf" 2>/dev/null || true
+                set +a
             fi
             _validate_extra_args=""
         fi
@@ -1356,6 +1362,7 @@ cmd_add() {
         build_reverse_proxy_site_block "$label" "$port" "$scheme" > "$file"
     fi
 
+    # shellcheck disable=SC2034 # read by Cloudflare variant hook while rendering site TLS
     FORCE_DNS_TLS=0
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then

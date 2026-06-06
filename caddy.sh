@@ -2,6 +2,7 @@
 # caddy.sh — 标准版 Caddy CLI (无 Cloudflare DNS 集成)
 # 用法: sudo c <subcommand>
 
+# shellcheck disable=SC2034 # consumed by sourced caddy-lib.sh cmd_update
 DEFAULT_UPDATE_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy.sh"
 
 # 定位共享库（与当前脚本同目录）
@@ -19,8 +20,10 @@ if [[ ! -f "$LIB_PATH" ]]; then
         echo "Fatal: 无法加载 caddy-lib.sh（本地缺失且 GitHub 不可达）" >&2
         exit 1
     }
+    # shellcheck disable=SC1091 # fallback sources downloaded library code from stdin
     source /dev/stdin <<<"$LIB_CODE"
 else
+    # shellcheck disable=SC1090 # runtime install path is resolved dynamically
     source "$LIB_PATH"
 fi
 
