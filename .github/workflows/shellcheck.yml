@@ -87,6 +87,10 @@ jobs:
           fi
           grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
           grep -q 'respond "disabled"' "$SITES_DIR/example.com.conf.disabled"
+
+          caddy() { return 0; }
+          cmd_import "$SITES_DIR/example.com.conf"
+          grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
           BASH
 
       - name: ShellCheck

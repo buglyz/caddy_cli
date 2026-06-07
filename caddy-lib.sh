@@ -2689,7 +2689,15 @@ cmd_import() {
         return 1
     fi
 
-    local sites_bak globals_bak state_bak old_email
+    local sites_bak globals_bak state_bak old_email tmp_src meta
+    tmp_src="$(mktemp)"
+    if ! cp -a "$src" "$tmp_src"; then
+        cleanup_paths "$tmp_src"
+        fail "无法复制导入源: $src"
+        return 1
+    fi
+    caddy fmt --overwrite "$tmp_src" >/dev/null 2>&1 || true
+
     sites_bak="$(mktemp -d "$BACKUP_DIR/sites.XXXXXX")"
     globals_bak="$(mktemp -d "$BACKUP_DIR/globals.XXXXXX")"
     state_bak="$(mktemp "$BACKUP_DIR/state.XXXXXX")"
@@ -2701,11 +2709,6 @@ cmd_import() {
 
     clear_managed_dir "$SITES_DIR"
     clear_managed_dir "$GLOBALS_DIR"
-
-    local tmp_src meta
-    tmp_src="$(mktemp)"
-    cp -a "$src" "$tmp_src"
-    caddy fmt --overwrite "$tmp_src" >/dev/null 2>&1 || true
 
     meta="$(python3 - "$tmp_src" "$GLOBALS_DIR" "$SITES_DIR" <<'PY'
 from pathlib import Path
