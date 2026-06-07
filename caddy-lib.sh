@@ -136,13 +136,33 @@ command_exists() {
 }
 
 current_script_path() {
-    if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-        echo "${BASH_SOURCE[0]}"
-    elif [[ -n "${0:-}" && -f "${0}" ]]; then
-        echo "${0}"
-    else
-        return 1
+    local src base
+    for src in "${BASH_SOURCE[@]}"; do
+        [[ -n "$src" && -f "$src" ]] || continue
+        base="$(basename "$src")"
+        [[ "$base" == "caddy-lib.sh" ]] && continue
+        printf '%s\n' "$src"
+        return 0
+    done
+    if [[ -n "${0:-}" && -f "${0}" ]]; then
+        base="$(basename "$0")"
+        [[ "$base" == "bash" || "$base" == "sh" ]] && return 1
+        printf '%s\n' "$0"
+        return 0
     fi
+    return 1
+}
+
+current_library_path() {
+    local src
+    for src in "${BASH_SOURCE[@]}"; do
+        [[ -n "$src" && -f "$src" ]] || continue
+        [[ "$(basename "$src")" == "caddy-lib.sh" ]] || continue
+        printf '%s\n' "$src"
+        return 0
+    done
+    [[ -f /usr/local/bin/caddy-lib.sh ]] || return 1
+    printf '%s\n' /usr/local/bin/caddy-lib.sh
 }
 
 require_command() {
@@ -2405,22 +2425,29 @@ cmd_doctor() {
 }
 
 cmd_install_self() {
-    local src target_bin target_alias
+    local src lib_src target_bin target_alias lib_bin
     src="$(current_script_path)" || {
         fail "无法定位当前脚本路径，不能自动安装命令"
+        return 1
+    }
+    lib_src="$(current_library_path)" || {
+        fail "无法定位 caddy-lib.sh，不能自动安装命令"
         return 1
     }
 
     target_bin="/usr/local/bin/caddyctl"
     target_alias="/usr/local/bin/c"
+    lib_bin="/usr/local/bin/caddy-lib.sh"
 
     install -d -m 0755 "$(dirname "$target_bin")"
     install -m 0755 "$src" "$target_bin"
+    install -m 0644 "$lib_src" "$lib_bin"
     ln -sf "$target_bin" "$target_alias"
 
     say "已安装脚本命令:"
     say "  $target_bin"
     say "  $target_alias -> $target_bin"
+    say "  $lib_bin"
     say "现在可以直接运行: c"
 }
 

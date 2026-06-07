@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r3}"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r4}"
 readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
 readonly CLI_URL="${CADDY_CLI_URL:-${CADDY_CLI_BASE_URL}/caddy.sh}"
 readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"
 readonly CHECKSUMS_URL="${CADDY_CHECKSUMS_URL:-${CADDY_CLI_BASE_URL}/checksums.txt}"
-readonly CLI_BIN="/usr/local/bin/c"
+readonly CLI_BIN="/usr/local/bin/caddyctl"
+readonly CLI_ALIAS="/usr/local/bin/c"
 readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
 
 # Debian-specific
@@ -179,6 +180,7 @@ install_cli() {
 
     install -m 0644 "$tmp_lib" "$LIB_BIN"
     install -m 0755 "$tmp_cli" "$CLI_BIN"
+    ln -sf "$CLI_BIN" "$CLI_ALIAS"
     rm -f "$tmp_lib" "$tmp_cli"
 }
 
