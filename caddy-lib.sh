@@ -2195,6 +2195,11 @@ cmd_disable() {
     fi
 
     target="$(disabled_site_path_for "$file")"
+    if [[ -e "$target" ]]; then
+        fail "禁用失败，目标文件已存在: $target"
+        return 1
+    fi
+
     mv "$file" "$target"
 
     if ! apply_config; then

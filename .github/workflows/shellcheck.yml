@@ -51,6 +51,44 @@ jobs:
           bash -c 'source ./caddy-lib.sh; build_static_site_block static.example.com "/var/www/site with spaces" on' > "$tmp"
           ./caddy validate --config "$tmp" --adapter caddyfile
 
+      - name: Site state smoke tests
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          bash -s "$tmpdir" <<'BASH'
+          set -euo pipefail
+          root="$1"
+          source ./caddy-lib.sh
+          SITES_DIR="$root/sites.d"
+          GLOBALS_DIR="$root/globals.d"
+          BACKUP_DIR="$root/backup"
+          STATE_FILE="$root/caddyctl.conf"
+          ACCESS_LOG_DIR="$root/log"
+          mkdir -p "$SITES_DIR" "$GLOBALS_DIR" "$BACKUP_DIR" "$ACCESS_LOG_DIR"
+          : > "$STATE_FILE"
+          apply_config() { return 0; }
+          fix_permissions() { :; }
+
+          cat > "$SITES_DIR/example.com.conf" <<'EOF'
+          example.com {
+              respond "enabled"
+          }
+          EOF
+          cat > "$SITES_DIR/example.com.conf.disabled" <<'EOF'
+          example.com {
+              respond "disabled"
+          }
+          EOF
+
+          if cmd_disable example.com; then
+              echo "cmd_disable unexpectedly overwrote an existing disabled site" >&2
+              exit 1
+          fi
+          grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
+          grep -q 'respond "disabled"' "$SITES_DIR/example.com.conf.disabled"
+          BASH
+
       - name: ShellCheck
         run: |
           shellcheck \
