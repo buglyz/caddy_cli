@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r2}"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r3}"
 readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
 readonly CADDY_CF_URL="${CADDY_CF_URL:-${CADDY_CLI_BASE_URL}/caddy-cloudflare}"
 readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"
@@ -10,7 +10,7 @@ readonly CADDY_RELEASE_URL="${CADDY_RELEASE_URL:-https://github.com/buglyz/caddy
 readonly CHECKSUMS_URL="${CADDY_CHECKSUMS_URL:-${CADDY_CLI_BASE_URL}/checksums.txt}"
 readonly CLI_BIN="/usr/local/bin/c"
 readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
-readonly CADDY_BIN="/usr/bin/caddy"
+readonly DEFAULT_CADDY_BIN="/usr/bin/caddy"
 readonly XCADDY_BIN="/usr/local/bin/xcaddy"
 readonly CADDY_VERSION="${CADDY_VERSION:-v2.11.3}"
 readonly XCADDY_VERSION="${XCADDY_VERSION:-v0.4.6}"
@@ -21,6 +21,7 @@ readonly OPENRC_CONF_D="/etc/conf.d/caddy"
 
 DISTRO=""
 BUILD_FROM_SOURCE=0
+CADDY_BIN="${CADDY_BIN:-}"
 
 detect_distro() {
     if [ -f /etc/alpine-release ]; then
@@ -58,6 +59,38 @@ require_root() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
+}
+
+detect_service_caddy_bin() {
+    local unit_bin
+    if command -v systemctl >/dev/null 2>&1; then
+        unit_bin="$(systemctl cat caddy 2>/dev/null \
+            | sed -n 's/^[[:space:]]*ExecStart=[[:space:]]*\([^[:space:]]*\/caddy\)\([[:space:]].*\)\{0,1\}$/\1/p' \
+            | tail -n 1 || true)"
+        if [[ -n "$unit_bin" ]]; then
+            printf '%s' "$unit_bin"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+resolve_caddy_bin() {
+    local unit_bin path_bin
+    if [[ -n "$CADDY_BIN" ]]; then
+        return 0
+    fi
+    unit_bin="$(detect_service_caddy_bin 2>/dev/null || true)"
+    if [[ -n "$unit_bin" ]]; then
+        CADDY_BIN="$unit_bin"
+        return 0
+    fi
+    path_bin="$(command -v caddy 2>/dev/null || true)"
+    if [[ -n "$path_bin" ]]; then
+        CADDY_BIN="$path_bin"
+        return 0
+    fi
+    CADDY_BIN="$DEFAULT_CADDY_BIN"
 }
 
 # Portable download: prefers curl, falls back to wget (BusyBox compatible)
@@ -176,9 +209,11 @@ download_caddy_from_repo() {
 
 install_caddy_binary() {
     local src="$1"
-    if command -v dpkg-divert >/dev/null 2>&1; then
+    resolve_caddy_bin
+    if [[ "$CADDY_BIN" == "/usr/bin/caddy" ]] && command -v dpkg-divert >/dev/null 2>&1; then
         dpkg-divert --local --add --rename --divert /usr/bin/caddy.default /usr/bin/caddy >/dev/null 2>&1 || true
     fi
+    install -d -m 0755 "$(dirname "$CADDY_BIN")"
     install -m 0755 "$src" "$CADDY_BIN"
     # Alpine: OpenRC init script expects caddy at /usr/sbin/caddy
     if [ -f /etc/alpine-release ]; then
