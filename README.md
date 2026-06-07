@@ -14,16 +14,17 @@
 
 **标准版：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r1/install.sh)
 ```
 
 **Cloudflare DNS 版（自动申请泛域名证书）：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install-cloudflare.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r1/install-cloudflare.sh)
 ```
 
 > Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
-> CF 版的预编译二进制是 `CGO_ENABLED=0` 纯静态编译，glibc 和 musl 通用。
+> CF 版的预编译二进制是 x86-64 `CGO_ENABLED=0` 纯静态编译，glibc 和 musl 通用；非 x86-64 会自动切换为源码构建。
+> 默认安装固定 release ref，并通过 `checksums.txt` 校验下载文件；如需测试 main，可设置 `CADDY_CLI_REF=main`。
 
 安装完成后直接运行：
 ```bash
@@ -38,8 +39,8 @@ sudo c help     # 命令行模式
 c add example.com 3000
 c add example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
-c add-gateway gate.example.com           # 通用反代网关 (HTTPS)
-c add-gateway gate.local --no-ssl        # 通用反代网关 (HTTP)
+c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
+c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
 c set example.com --port 4000 --no-log
 c enable example.com
 c disable example.com
@@ -81,7 +82,15 @@ c import /path/to/Caddyfile   # 导入现有配置
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
-- 通用反代网关：通过 `c add-gateway` 创建动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由
+- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由
+
+## 供应链与安全
+
+- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r1`，并校验同 tag 下的 `checksums.txt`。
+- `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
+- Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
+- 本地共享库缺失时，CLI 默认不再在线 `source` 远程代码；临时救急可设置 `CADDYCTL_ALLOW_REMOTE_LIB=1`。
+- `add-gateway` 默认必须配置 allow-list。只有在已有认证、内网隔离或其他访问控制时，才使用 `--unsafe-open-proxy`。
 
 ## 发行版支持
 
@@ -122,3 +131,4 @@ c cert-check your-domain.com
 - 如果系统没有 service manager（systemd / OpenRC），脚本只写配置，不会自动重载服务
 - Cloudflare DNS 版需要先运行 `c cloudflare set` 配置 API token
 - **不要手动编辑 `/etc/caddy/Caddyfile`**，它由脚本从 `sites.d/` 和 `globals.d/` 自动生成
+- 不要把 `add-gateway --unsafe-open-proxy` 暴露到公网；它会允许访问者指定任意上游地址。

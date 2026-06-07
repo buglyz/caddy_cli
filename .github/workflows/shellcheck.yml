@@ -37,6 +37,10 @@ jobs:
             bash -n "$script"
           done
 
+      - name: Check checksums
+        run: |
+          sha256sum -c checksums.txt
+
       - name: ShellCheck
         run: |
           shellcheck \

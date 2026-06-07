@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CADDY_CF_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-cloudflare"
-readonly LIB_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-lib.sh"
-readonly CADDY_RAW_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r1}"
+readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
+readonly CADDY_CF_URL="${CADDY_CF_URL:-${CADDY_CLI_BASE_URL}/caddy-cloudflare}"
+readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"
+readonly CADDY_RAW_URL="${CADDY_RAW_URL:-${CADDY_CLI_BASE_URL}/caddy}"
+readonly CADDY_RELEASE_URL="${CADDY_RELEASE_URL:-https://github.com/buglyz/caddy_cli/releases/download/${CADDY_CLI_REF}/caddy}"
+readonly CHECKSUMS_URL="${CADDY_CHECKSUMS_URL:-${CADDY_CLI_BASE_URL}/checksums.txt}"
 readonly CLI_BIN="/usr/local/bin/c"
 readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
 readonly CADDY_BIN="/usr/bin/caddy"
 readonly XCADDY_BIN="/usr/local/bin/xcaddy"
-readonly CLOUDFLARE_MODULE="github.com/caddy-dns/cloudflare"
+readonly CADDY_VERSION="${CADDY_VERSION:-v2.11.3}"
+readonly XCADDY_VERSION="${XCADDY_VERSION:-v0.4.6}"
+readonly CLOUDFLARE_MODULE="${CLOUDFLARE_MODULE:-github.com/caddy-dns/cloudflare@v0.2.4}"
 readonly CLOUD_FILE_DROPIN="/etc/systemd/system/caddy.service.d/10-cloudflare-env.conf"
 readonly CLOUD_ENV_FILE="/etc/caddy/cloudflare.env"
 readonly OPENRC_CONF_D="/etc/conf.d/caddy"
@@ -67,6 +73,31 @@ safe_download() {
     fi
 }
 
+verify_checksum() {
+    local file="$1"
+    local name="$2"
+    local sums expected actual
+
+    if [[ "${CADDYCTL_SKIP_CHECKSUM:-0}" == "1" ]]; then
+        log "(Warning) Skipping checksum verification for $name"
+        return 0
+    fi
+
+    require_command sha256sum
+    sums="$(mktemp)"
+    safe_download "$CHECKSUMS_URL" "$sums" || {
+        rm -f "$sums"
+        die "Failed to download checksums: $CHECKSUMS_URL"
+    }
+
+    expected="$(awk -v name="$name" '$2 == name { print $1; exit }' "$sums")"
+    rm -f "$sums"
+    [[ -n "$expected" ]] || die "Checksum entry not found for $name"
+
+    actual="$(sha256sum "$file" | awk '{ print $1 }')"
+    [[ "$actual" == "$expected" ]] || die "Checksum mismatch for $name"
+}
+
 # ── Debian ──────────────────────────────────────────────
 
 install_deps_debian() {
@@ -93,7 +124,7 @@ install_xcaddy() {
     fi
 
     require_command go
-    GOBIN="$(dirname "$XCADDY_BIN")" go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+    GOBIN="$(dirname "$XCADDY_BIN")" go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
     [[ -x "$XCADDY_BIN" ]] || die "xcaddy installation failed: $XCADDY_BIN"
 }
 
@@ -103,11 +134,18 @@ build_caddy_with_cloudflare() {
     tmpdir="$(mktemp -d)"
     built="$tmpdir/caddy"
 
-    "$XCADDY_BIN" build --with "$CLOUDFLARE_MODULE" --output "$built"
+    "$XCADDY_BIN" build "$CADDY_VERSION" --with "$CLOUDFLARE_MODULE" --output "$built"
     [[ -s "$built" ]] || die "Built Caddy binary is empty"
 
     install_caddy_binary "$built"
     rm -rf "$tmpdir"
+}
+
+prebuilt_caddy_supported() {
+    case "$(uname -m 2>/dev/null || echo unknown)" in
+        x86_64|amd64) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 download_caddy_from_repo() {
@@ -120,13 +158,17 @@ download_caddy_from_repo() {
     local tmp
     tmp="$(mktemp)"
 
-    if ! safe_download "$CADDY_RAW_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
-        log "GitHub raw slow, trying jsDelivr CDN..."
-        safe_download "https://cdn.jsdelivr.net/gh/buglyz/caddy_cli@main/caddy" "$tmp" \
-            || die "Download failed: $CADDY_RAW_URL"
+    if ! safe_download "$CADDY_RELEASE_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
+        log "Release asset unavailable, trying repository raw file..."
+        if ! safe_download "$CADDY_RAW_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
+            log "GitHub raw slow, trying jsDelivr CDN..."
+            safe_download "https://cdn.jsdelivr.net/gh/buglyz/caddy_cli@${CADDY_CLI_REF}/caddy" "$tmp" \
+                || die "Download failed: $CADDY_RAW_URL"
+        fi
     fi
 
     [[ -s "$tmp" ]] || die "Downloaded Caddy binary is empty"
+    verify_checksum "$tmp" "caddy"
 
     install_caddy_binary "$tmp"
     rm -f "$tmp"
@@ -284,17 +326,19 @@ install_cli_cf() {
     tmp_lib="$(mktemp)"
     safe_download "$LIB_URL" "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
+    verify_checksum "$tmp_lib" "caddy-lib.sh"
     bash -n "$tmp_lib"
-    install -m 0644 "$tmp_lib" "$LIB_BIN"
-    rm -f "$tmp_lib"
 
     local tmp_cli
     tmp_cli="$(mktemp)"
     safe_download "$CADDY_CF_URL" "$tmp_cli"
     [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CADDY_CF_URL"
+    verify_checksum "$tmp_cli" "caddy-cloudflare"
     bash -n "$tmp_cli"
+
+    install -m 0644 "$tmp_lib" "$LIB_BIN"
     install -m 0755 "$tmp_cli" "$CLI_BIN"
-    rm -f "$tmp_cli"
+    rm -f "$tmp_lib" "$tmp_cli"
 }
 
 # ── Main ─────────────────────────────────────────────────
@@ -307,6 +351,11 @@ install_debian() {
     fi
 
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
+
+    if [[ "$BUILD_FROM_SOURCE" -eq 0 ]] && ! prebuilt_caddy_supported; then
+        log "Pre-built binary is x86-64 only; switching to build-from-source for this architecture."
+        BUILD_FROM_SOURCE=1
+    fi
 
     if [[ "$BUILD_FROM_SOURCE" -eq 1 ]]; then
         install_build_deps_debian
@@ -340,6 +389,11 @@ install_alpine() {
 
     log "Starting Caddy Cloudflare installer (Alpine Linux)..."
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
+
+    if [[ "$BUILD_FROM_SOURCE" -eq 0 ]] && ! prebuilt_caddy_supported; then
+        log "Pre-built binary is x86-64 only; switching to build-from-source for this architecture."
+        BUILD_FROM_SOURCE=1
+    fi
 
     if [[ "$BUILD_FROM_SOURCE" -eq 1 ]]; then
         install_alpine_init_script

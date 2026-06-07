@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CLI_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy.sh"
-readonly LIB_URL="https://raw.githubusercontent.com/buglyz/caddy_cli/main/caddy-lib.sh"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r1}"
+readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
+readonly CLI_URL="${CADDY_CLI_URL:-${CADDY_CLI_BASE_URL}/caddy.sh}"
+readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"
+readonly CHECKSUMS_URL="${CADDY_CHECKSUMS_URL:-${CADDY_CLI_BASE_URL}/checksums.txt}"
 readonly CLI_BIN="/usr/local/bin/c"
 readonly LIB_BIN="/usr/local/bin/caddy-lib.sh"
 
@@ -50,6 +53,31 @@ require_root() {
 require_command() {
     local cmd="$1"
     command -v "$cmd" >/dev/null 2>&1 || die "Missing command: $cmd"
+}
+
+verify_checksum() {
+    local file="$1"
+    local name="$2"
+    local sums expected actual
+
+    if [[ "${CADDYCTL_SKIP_CHECKSUM:-0}" == "1" ]]; then
+        log "(Warning) Skipping checksum verification for $name"
+        return 0
+    fi
+
+    require_command sha256sum
+    sums="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 "$CHECKSUMS_URL" -o "$sums" || {
+        rm -f "$sums"
+        die "Failed to download checksums: $CHECKSUMS_URL"
+    }
+
+    expected="$(awk -v name="$name" '$2 == name { print $1; exit }' "$sums")"
+    rm -f "$sums"
+    [[ -n "$expected" ]] || die "Checksum entry not found for $name"
+
+    actual="$(sha256sum "$file" | awk '{ print $1 }')"
+    [[ "$actual" == "$expected" ]] || die "Checksum mismatch for $name"
 }
 
 # ── Debian ──────────────────────────────────────────────
@@ -140,16 +168,18 @@ install_cli() {
     tmp_lib="$(mktemp)"
     curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
+    verify_checksum "$tmp_lib" "caddy-lib.sh"
     bash -n "$tmp_lib"
-    install -m 0644 "$tmp_lib" "$LIB_BIN"
-    rm -f "$tmp_lib"
 
     tmp_cli="$(mktemp)"
     curl -fsSL --retry 3 --retry-delay 1 "$CLI_URL" -o "$tmp_cli"
     [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CLI_URL"
+    verify_checksum "$tmp_cli" "caddy.sh"
     bash -n "$tmp_cli"
+
+    install -m 0644 "$tmp_lib" "$LIB_BIN"
     install -m 0755 "$tmp_cli" "$CLI_BIN"
-    rm -f "$tmp_cli"
+    rm -f "$tmp_lib" "$tmp_cli"
 }
 
 init_layout_and_permissions() {

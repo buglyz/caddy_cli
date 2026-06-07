@@ -157,6 +157,39 @@ cleanup_paths() {
     rm -rf -- "$@" 2>/dev/null || true
 }
 
+verify_download_checksum() {
+    local file="$1"
+    local name="$2"
+    local checksums_url="$3"
+    local sums expected actual
+
+    if [[ "${CADDYCTL_SKIP_CHECKSUM:-0}" == "1" ]]; then
+        say "(Warning) 跳过 SHA256 校验: $name"
+        return 0
+    fi
+
+    require_command sha256sum
+    sums="$(mktemp)"
+    if ! curl -fsSL --retry 3 --retry-delay 1 "$checksums_url" -o "$sums"; then
+        cleanup_paths "$sums"
+        fail "无法下载校验文件: $checksums_url"
+        return 1
+    fi
+
+    expected="$(awk -v name="$name" '$2 == name { print $1; exit }' "$sums")"
+    cleanup_paths "$sums"
+    if [[ -z "$expected" ]]; then
+        fail "校验文件缺少条目: $name"
+        return 1
+    fi
+
+    actual="$(sha256sum "$file" | awk '{ print $1 }')"
+    if [[ "$actual" != "$expected" ]]; then
+        fail "SHA256 校验失败: $name"
+        return 1
+    fi
+}
+
 backup_file_if_exists() {
     local file="$1"
     if [[ -f "$file" ]]; then
@@ -356,6 +389,40 @@ validate_path_prefix() {
     [[ "$prefix" != *$'\r'* ]] || return 1
     [[ "$prefix" != *$'\n'* ]] || return 1
     return 0
+}
+
+validate_gateway_upstream() {
+    local upstream="$1"
+    [[ -n "$upstream" ]] || return 1
+    [[ "$upstream" != *$'\r'* ]] || return 1
+    [[ "$upstream" != *$'\n'* ]] || return 1
+    [[ "$upstream" =~ ^[A-Za-z0-9._:-]+$ ]] || return 1
+    [[ "$upstream" == *:* ]] || return 1
+}
+
+regex_escape() {
+    printf '%s' "$1" | sed 's/[][(){}.^$+*?|\\]/\\&/g'
+}
+
+gateway_allow_regex() {
+    local spec="$1"
+    local item escaped out=""
+    local -a items=()
+
+    IFS=',' read -ra items <<< "$spec"
+    for item in "${items[@]}"; do
+        item="$(trim "$item")"
+        [[ -n "$item" ]] || continue
+        if ! validate_gateway_upstream "$item"; then
+            fail "网关 allow-list 条目不合法: $item（请使用 host:port）"
+            return 1
+        fi
+        escaped="$(regex_escape "$item")"
+        out="${out:+$out|}$escaped"
+    done
+
+    [[ -n "$out" ]] || return 1
+    printf '%s' "$out"
 }
 
 normalize_path_prefix() {
@@ -1107,10 +1174,22 @@ write_site_file() {
 build_gateway_site_block() {
     local label="$1"
     local scheme="${2:-https}"
+    local allow_regex="${3:-}"
+    local allow_display="${4:-}"
+    local host_pattern="([^/]+)"
+    local no_slash_pattern="([A-Za-z0-9.\\-_:]+)"
+    local access_note="任意上游（高风险，仅限受控网络或已加外部认证）"
+
+    if [[ -n "$allow_regex" ]]; then
+        host_pattern="(${allow_regex})"
+        no_slash_pattern="(${allow_regex})"
+        access_note="仅允许: ${allow_display}"
+    fi
 
     cat <<BLOCK
 # Emby 通用反代网关 — $label
 # 用法: ${scheme}://${label}/<上游主机:端口>/路径
+# 上游限制: ${access_note}
 # 生成: $(date '+%F %T')
 
 ${scheme}://${label} {
@@ -1129,17 +1208,18 @@ OK
   ${scheme}://${label}/http/<上游主机:端口>/路径
   ${scheme}://${label}/https/<上游主机:端口>/路径
 
+上游限制: ${access_note}
 默认按 HTTPS 回源；若需 HTTP 回源请使用 /http 前缀。
 INFO 200
     }
 
-    @noSlashHttp path_regexp redir_http ^/http/([A-Za-z0-9.\-_:]+)\$
+    @noSlashHttp path_regexp redir_http ^/http/${no_slash_pattern}\$
     redir @noSlashHttp /http/{re.redir_http.1}/ 308
 
-    @noSlashHttps path_regexp redir_https ^/https/([A-Za-z0-9.\-_:]+)\$
+    @noSlashHttps path_regexp redir_https ^/https/${no_slash_pattern}\$
     redir @noSlashHttps /https/{re.redir_https.1}/ 308
 
-    @httpProxy path_regexp up_http ^/http/([^/]+)(/.*)
+    @httpProxy path_regexp up_http ^/http/${host_pattern}(/.*)
     handle @httpProxy {
         rewrite * {re.up_http.2}
         reverse_proxy {
@@ -1150,7 +1230,7 @@ INFO 200
         }
     }
 
-    @httpsProxy path_regexp up_https ^/https/([^/]+)(/.*)
+    @httpsProxy path_regexp up_https ^/https/${host_pattern}(/.*)
     handle @httpsProxy {
         rewrite * {re.up_https.2}
         reverse_proxy {
@@ -1164,7 +1244,7 @@ INFO 200
     }
 
     @defaultProxy {
-        path_regexp up_default ^/([^/]+)(/.*)
+        path_regexp up_default ^/${host_pattern}(/.*)
         not path /http/* /https/*
     }
     handle @defaultProxy {
@@ -1179,7 +1259,7 @@ INFO 200
         }
     }
 
-    @noSlash path_regexp redir_bare ^/([A-Za-z0-9.\-_:]+)\$
+    @noSlash path_regexp redir_bare ^/${no_slash_pattern}\$
     redir @noSlash /{re.redir_bare.1}/ 308
 }
 BLOCK
@@ -1254,11 +1334,20 @@ cmd_add_emby() {
 cmd_add_gateway() {
     local label=""
     local scheme="https"
+    local allow_spec=""
+    local allow_regex=""
+    local unsafe_open_proxy=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-ssl|--http) scheme="http" ;;
+            --allow)
+                shift
+                [[ $# -gt 0 ]] || { fail "--allow 需要 host:port 列表"; return 1; }
+                allow_spec="$1"
+                ;;
+            --unsafe-open-proxy) unsafe_open_proxy=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-gateway 参数: $1"; return 1 ;;
             *) positional+=("$1") ;;
@@ -1276,6 +1365,18 @@ cmd_add_gateway() {
         return 1
     fi
 
+    if [[ -n "$allow_spec" && "$unsafe_open_proxy" -eq 1 ]]; then
+        fail "--allow 与 --unsafe-open-proxy 不能同时使用"
+        return 1
+    fi
+    if [[ -z "$allow_spec" && "$unsafe_open_proxy" -ne 1 ]]; then
+        fail "add-gateway 默认需要 --allow <host:port,...>，避免创建公网开放代理。确需开放任意上游时使用 --unsafe-open-proxy。"
+        return 1
+    fi
+    if [[ -n "$allow_spec" ]]; then
+        allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
+    fi
+
     local sanitized old_file new_file file site_block
     sanitized="$(sanitize_name "$label")"
     new_file="${SITES_DIR}/${sanitized}.conf"
@@ -1289,7 +1390,7 @@ cmd_add_gateway() {
         fi
     done
 
-    site_block="$(build_gateway_site_block "$label" "$scheme")"
+    site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     ensure_dirs
     write_site_file "$new_file" "$label" "$site_block"
     fix_permissions
@@ -1297,6 +1398,11 @@ cmd_add_gateway() {
         say "已添加通用反代网关（HTTP，不申请证书）: $label"
     else
         say "已添加通用反代网关: $label（自动申请 Let's Encrypt 证书）"
+    fi
+    if [[ -n "$allow_spec" ]]; then
+        say "允许上游: $allow_spec"
+    else
+        say "警告: 已创建开放动态代理网关，请确保外部已有认证或网络隔离。"
     fi
     say "用法: ${scheme}://${label}/<上游主机:端口>/路径"
 }
@@ -2291,15 +2397,16 @@ cmd_update() {
     require_command curl
     require_command bash
 
-    local url lib_url tmp tmp_lib target_bin target_alias lib_bin
+    local url lib_url checksums_url tmp tmp_lib target_bin target_alias lib_bin
     url="${CADDYCTL_UPDATE_URL:-$DEFAULT_UPDATE_URL}"
     lib_url="${url%/*}/caddy-lib.sh"
+    checksums_url="${CADDYCTL_CHECKSUMS_URL:-${url%/*}/checksums.txt}"
 
     target_bin="/usr/local/bin/caddyctl"
     target_alias="/usr/local/bin/c"
     lib_bin="/usr/local/bin/caddy-lib.sh"
 
-    # 1) 下载并安装前端脚本
+    # 1) 下载并校验前端脚本
     tmp="$(mktemp)"
     say "正在下载: $url"
     if ! curl -fsSL --retry 3 --retry-delay 1 "$url" -o "$tmp"; then
@@ -2317,32 +2424,41 @@ cmd_update() {
         fail "下载脚本语法校验失败，已中止更新。"
         return 1
     fi
-    install -d -m 0755 "$(dirname "$target_bin")"
-    install -m 0755 "$tmp" "$target_bin"
-    ln -sf "$target_bin" "$target_alias"
-    cleanup_paths "$tmp"
-
-    # 2) 下载并安装共享库
+    if ! verify_download_checksum "$tmp" "$(basename "$url")" "$checksums_url"; then
+        cleanup_paths "$tmp"
+        return 1
+    fi
+    # 2) 下载并校验共享库
     tmp_lib="$(mktemp)"
     say "正在下载: $lib_url"
     if ! curl -fsSL --retry 3 --retry-delay 1 "$lib_url" -o "$tmp_lib"; then
-        cleanup_paths "$tmp_lib"
-        fail "共享库下载失败，前端已更新但库未更新，请检查网络。"
+        cleanup_paths "$tmp" "$tmp_lib"
+        fail "共享库下载失败，已中止更新。"
         return 1
     fi
     if [[ ! -s "$tmp_lib" ]]; then
-        cleanup_paths "$tmp_lib"
+        cleanup_paths "$tmp" "$tmp_lib"
         fail "共享库下载为空，已中止。"
         return 1
     fi
     if ! bash -n "$tmp_lib"; then
-        cleanup_paths "$tmp_lib"
+        cleanup_paths "$tmp" "$tmp_lib"
         fail "共享库语法校验失败，已中止。"
         return 1
     fi
+    if ! verify_download_checksum "$tmp_lib" "caddy-lib.sh" "$checksums_url"; then
+        cleanup_paths "$tmp" "$tmp_lib"
+        return 1
+    fi
+
+    # 3) 全部通过后再安装，避免前端和共享库版本不一致
+    install -d -m 0755 "$(dirname "$target_bin")"
+    install -m 0755 "$tmp" "$target_bin"
+    ln -sf "$target_bin" "$target_alias"
+
     install -d -m 0755 "$(dirname "$lib_bin")"
     install -m 0644 "$tmp_lib" "$lib_bin"
-    cleanup_paths "$tmp_lib"
+    cleanup_paths "$tmp" "$tmp_lib"
 
     say "更新完成:"
     say "  $target_bin"
@@ -2439,7 +2555,8 @@ cmd_show_help() {
   c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only]
   c add-static <域名> <目录> [--spa]
   c add-emby <域名> <目标地址> [--http]
-  c add-gateway <域名> [--no-ssl]
+  c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl]
+  c add-gateway <域名> --unsafe-open-proxy [--no-ssl]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
   c rm <域名>
   c enable <域名>
@@ -2469,8 +2586,8 @@ cmd_show_help() {
   c add-static static.example.com /var/www/site --spa
   c add-emby emby.example.com https://10.0.0.5:8096
   c add-emby lan.example.com http://10.0.0.5:8096 --http
-  c add-gateway gate.example.com
-  c add-gateway gate.local --no-ssl
+  c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
+  c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
   c update
   c set example.com --port 4000
   c set emby.example.com --target https://10.0.0.6:8096
@@ -2872,4 +2989,3 @@ main() {
         *) fail "未知命令: $cmd"; cmd_show_help; exit 1 ;;
     esac
 }
-

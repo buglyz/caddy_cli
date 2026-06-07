@@ -6,21 +6,28 @@ set -euo pipefail
 
 DOMAIN=""
 NO_SSL=0
+ALLOW_SPEC=""
+ALLOW_REGEX=""
+UNSAFE_OPEN_PROXY=0
 CADDY_SITES_DIR="${CADDY_SITES_DIR:-/etc/caddy/sites.d}"
 CONF_FILE=""
 
 usage() {
     cat <<'EOF'
-用法: emby-gateway --domain <域名> [--no-ssl]
+用法: emby-gateway --domain <域名> --allow <host:port[,host:port...]> [--no-ssl]
+      emby-gateway --domain <域名> --unsafe-open-proxy [--no-ssl]
 
   通用反向代理网关 — 在 Caddy 上部署，通过 URL 路径动态反代任意上游。
 
   --domain <域名>   网关域名（如 gate.example.com）
+  --allow <列表>    允许的上游 host:port，多个用逗号分隔
+  --unsafe-open-proxy
+                   允许任意上游（高风险，仅限已有认证或内网隔离场景）
   --no-ssl          禁用 HTTPS（仅 HTTP 模式）
 
 示例:
-  emby-gateway --domain gate.example.com
-  emby-gateway --domain gate.local --no-ssl
+  emby-gateway --domain gate.example.com --allow emby.example.com:443,10.0.0.5:8096
+  emby-gateway --domain gate.local --allow 10.0.0.5:8096 --no-ssl
 
 使用方式（部署后）:
   https://gate.example.com/192.168.1.100:8096/   → 反代到 HTTPS 上游
@@ -30,10 +37,61 @@ EOF
     exit 0
 }
 
+trim_value() {
+    local value="$*"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
+
+validate_gateway_upstream() {
+    local upstream="$1"
+    [[ -n "$upstream" ]] || return 1
+    [[ "$upstream" != *$'\r'* ]] || return 1
+    [[ "$upstream" != *$'\n'* ]] || return 1
+    [[ "$upstream" =~ ^[A-Za-z0-9._:-]+$ ]] || return 1
+    [[ "$upstream" == *:* ]] || return 1
+}
+
+regex_escape() {
+    printf '%s' "$1" | sed 's/[][(){}.^$+*?|\\]/\\&/g'
+}
+
+gateway_allow_regex() {
+    local spec="$1"
+    local item escaped out=""
+    local -a items=()
+
+    IFS=',' read -ra items <<< "$spec"
+    for item in "${items[@]}"; do
+        item="$(trim_value "$item")"
+        [[ -n "$item" ]] || continue
+        if ! validate_gateway_upstream "$item"; then
+            echo "allow-list 条目不合法: $item（请使用 host:port）" >&2
+            return 1
+        fi
+        escaped="$(regex_escape "$item")"
+        out="${out:+$out|}$escaped"
+    done
+
+    [[ -n "$out" ]] || return 1
+    printf '%s' "$out"
+}
+
 # ── 参数解析 ──
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain) DOMAIN="$2"; shift 2 ;;
+        --domain)
+            [[ $# -ge 2 ]] || { echo "--domain 需要参数"; usage; }
+            DOMAIN="$2"
+            shift 2
+            ;;
+        --allow)
+            [[ $# -ge 2 ]] || { echo "--allow 需要参数"; usage; }
+            ALLOW_SPEC="$2"
+            shift 2
+            ;;
+        --unsafe-open-proxy) UNSAFE_OPEN_PROXY=1; shift ;;
         --no-ssl) NO_SSL=1; shift ;;
         -h|--help) usage ;;
         *) echo "未知参数: $1"; usage ;;
@@ -45,7 +103,22 @@ if [[ -z "$DOMAIN" ]]; then
 fi
 [[ -n "$DOMAIN" ]] || { echo "域名不能为空"; exit 1; }
 
-CONF_FILE="$CADDY_SITES_DIR/${DOMAIN}.conf"
+if [[ -n "$ALLOW_SPEC" && "$UNSAFE_OPEN_PROXY" -eq 1 ]]; then
+    echo "--allow 与 --unsafe-open-proxy 不能同时使用" >&2
+    exit 1
+fi
+if [[ -z "$ALLOW_SPEC" && "$UNSAFE_OPEN_PROXY" -ne 1 ]]; then
+    echo "默认需要 --allow <host:port,...>，避免创建公网开放代理。" >&2
+    echo "确需开放任意上游时使用 --unsafe-open-proxy。" >&2
+    exit 1
+fi
+if [[ -n "$ALLOW_SPEC" ]]; then
+    ALLOW_REGEX="$(gateway_allow_regex "$ALLOW_SPEC")" || exit 1
+fi
+
+SAFE_DOMAIN="$(printf '%s' "$DOMAIN" | tr '/: ,' '____' | tr -cd 'A-Za-z0-9._-')"
+[[ -n "$SAFE_DOMAIN" ]] || { echo "域名不合法"; exit 1; }
+CONF_FILE="$CADDY_SITES_DIR/${SAFE_DOMAIN}.conf"
 
 if [[ -f "$CONF_FILE" ]]; then
     read -rp "站点 $DOMAIN 已存在，覆盖？[y/N]: " CONFIRM
@@ -72,20 +145,21 @@ OK
   __SCHEME__://__DOMAIN__/http/<上游主机:端口>/路径
   __SCHEME__://__DOMAIN__/https/<上游主机:端口>/路径
 
+上游限制: __ACCESS_NOTE__
 默认按 HTTPS 回源；若需 HTTP 回源请使用 /http 前缀。
 INFO 200
     }
 
     # 尾部斜杠重定向 — HTTP 前缀
-    @noSlashHttp path_regexp redir_http ^/http/([A-Za-z0-9.\-_:]+)$
+    @noSlashHttp path_regexp redir_http ^/http/__NO_SLASH__$
     redir @noSlashHttp /http/{re.redir_http.1}/ 308
 
     # 尾部斜杠重定向 — HTTPS 前缀
-    @noSlashHttps path_regexp redir_https ^/https/([A-Za-z0-9.\-_:]+)$
+    @noSlashHttps path_regexp redir_https ^/https/__NO_SLASH__$
     redir @noSlashHttps /https/{re.redir_https.1}/ 308
 
     # HTTP 上游反代
-    @httpProxy path_regexp up_http ^/http/([^/]+)(/.*)
+    @httpProxy path_regexp up_http ^/http/__HOST__(/.*)
     handle @httpProxy {
         rewrite * {re.up_http.2}
         reverse_proxy {
@@ -97,7 +171,7 @@ INFO 200
     }
 
     # HTTPS 上游反代（显式 /https/ 前缀）
-    @httpsProxy path_regexp up_https ^/https/([^/]+)(/.*)
+    @httpsProxy path_regexp up_https ^/https/__HOST__(/.*)
     handle @httpsProxy {
         rewrite * {re.up_https.2}
         reverse_proxy {
@@ -112,7 +186,7 @@ INFO 200
 
     # 默认上游反代（无前缀 → HTTPS）
     @defaultProxy {
-        path_regexp up_default ^/([^/]+)(/.*)
+        path_regexp up_default ^/__HOST__(/.*)
         not path /http/* /https/*
     }
     handle @defaultProxy {
@@ -128,10 +202,30 @@ INFO 200
     }
 
     # 尾部斜杠重定向 — 裸路径（放最后）
-    @noSlash path_regexp redir_bare ^/([A-Za-z0-9.\-_:]+)$
+    @noSlash path_regexp redir_bare ^/__NO_SLASH__$
     redir @noSlash /{re.redir_bare.1}/ 308
 ROUTES
 )
+
+HOST_PATTERN="([^/]+)"
+NO_SLASH_PATTERN="([A-Za-z0-9.\\-_:]+)"
+ACCESS_NOTE="任意上游（高风险，仅限受控网络或已加外部认证）"
+if [[ -n "$ALLOW_REGEX" ]]; then
+    HOST_PATTERN="(${ALLOW_REGEX})"
+    NO_SLASH_PATTERN="(${ALLOW_REGEX})"
+    ACCESS_NOTE="仅允许: ${ALLOW_SPEC}"
+fi
+
+render_routes() {
+    local scheme="$1"
+    local rendered="$ROUTES"
+    rendered="${rendered//__SCHEME__/$scheme}"
+    rendered="${rendered//__DOMAIN__/$DOMAIN}"
+    rendered="${rendered//__HOST__/$HOST_PATTERN}"
+    rendered="${rendered//__NO_SLASH__/$NO_SLASH_PATTERN}"
+    rendered="${rendered//__ACCESS_NOTE__/$ACCESS_NOTE}"
+    printf '%s\n' "$rendered"
+}
 
 if [[ "$NO_SSL" -eq 1 ]]; then
     cat > "$CONF_FILE" <<CADDY
@@ -140,7 +234,7 @@ if [[ "$NO_SSL" -eq 1 ]]; then
 # 生成: $(date '+%F %T')
 
 http://${DOMAIN} {
-$(echo "$ROUTES" | sed "s|__SCHEME__|http|g; s|__DOMAIN__|${DOMAIN}|g")
+$(render_routes http)
 }
 CADDY
 
@@ -151,7 +245,7 @@ else
 # 生成: $(date '+%F %T')
 
 ${DOMAIN} {
-$(echo "$ROUTES" | sed "s|__SCHEME__|https|g; s|__DOMAIN__|${DOMAIN}|g")
+$(render_routes https)
 }
 CADDY
 
@@ -160,7 +254,9 @@ fi
 echo "配置已写入: $CONF_FILE"
 
 # ── 校验并重载 ──
-if command -v caddy &>/dev/null; then
+if [[ "$CADDY_SITES_DIR" != "/etc/caddy/sites.d" ]]; then
+    echo "检测到自定义 CADDY_SITES_DIR，跳过系统校验与重载。"
+elif command -v caddy &>/dev/null; then
     echo "校验 Caddy 配置..."
     if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1 | grep -q 'Valid'; then
         echo "配置校验通过，重载 Caddy..."
@@ -185,6 +281,7 @@ echo "======================================"
 echo "  部署完成"
 echo "  域名: ${DOMAIN}"
 echo "  SSL: $([ "$NO_SSL" -eq 1 ] && echo '关闭' || echo '开启（Lets Encrypt 自动签发）')"
+echo "  上游: $ACCESS_NOTE"
 echo "======================================"
 echo
 if [[ "$NO_SSL" -eq 1 ]]; then
