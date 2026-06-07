@@ -41,6 +41,16 @@ jobs:
         run: |
           sha256sum -c checksums.txt
 
+      - name: Generated Caddyfile smoke tests
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          bash -c 'source ./caddy-lib.sh; build_gateway_site_block gate.example.com https "$(gateway_allow_regex "emby.example.com:443,10.0.0.5:8096")" "emby.example.com:443,10.0.0.5:8096"' > "$tmp"
+          ./caddy validate --config "$tmp" --adapter caddyfile
+
+          bash -c 'source ./caddy-lib.sh; build_static_site_block static.example.com "/var/www/site with spaces" on' > "$tmp"
+          ./caddy validate --config "$tmp" --adapter caddyfile
+
       - name: ShellCheck
         run: |
           shellcheck \

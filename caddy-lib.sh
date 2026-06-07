@@ -380,6 +380,13 @@ validate_static_dir() {
     return 0
 }
 
+caddyfile_quote() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '"%s"' "$value"
+}
+
 validate_path_prefix() {
     local prefix="$1"
     [[ -n "$prefix" ]] || return 1
@@ -393,11 +400,27 @@ validate_path_prefix() {
 
 validate_gateway_upstream() {
     local upstream="$1"
+    local host port
     [[ -n "$upstream" ]] || return 1
     [[ "$upstream" != *$'\r'* ]] || return 1
     [[ "$upstream" != *$'\n'* ]] || return 1
     [[ "$upstream" =~ ^[A-Za-z0-9._:-]+$ ]] || return 1
     [[ "$upstream" == *:* ]] || return 1
+    host="${upstream%:*}"
+    port="${upstream##*:}"
+    [[ -n "$host" ]] || return 1
+    validate_port "$port"
+}
+
+validate_proxy_target() {
+    local target="$1"
+    [[ -n "$target" ]] || return 1
+    [[ "$target" == http://* || "$target" == https://* ]] || return 1
+    [[ "$target" != *[[:space:]]* ]] || return 1
+    [[ "$target" != *"{"* ]] || return 1
+    [[ "$target" != *"}"* ]] || return 1
+    [[ "$target" != *"\""* ]] || return 1
+    [[ "$target" != *"'"* ]] || return 1
 }
 
 regex_escape() {
@@ -1091,7 +1114,7 @@ $label {
 EOF
     emit_site_common_blocks
     cat <<EOF
-    root * $site_dir
+    root * $(caddyfile_quote "$site_dir")
 EOF
     if [[ "$spa_mode" == "on" ]]; then
         cat <<'EOF'
@@ -1287,8 +1310,8 @@ cmd_add_emby() {
         read -rp "请输入你的域名: " label
     fi
     label="$(trim "$label")"
-    if [[ -z "$label" ]]; then
-        fail "域名不能为空"
+    if ! validate_domain "$label"; then
+        fail "域名不合法"
         return 1
     fi
 
@@ -1304,6 +1327,10 @@ cmd_add_emby() {
     # Auto-add https:// if missing
     if [[ "$target_domain" != http://* ]] && [[ "$target_domain" != https://* ]]; then
         target_domain="https://${target_domain}"
+    fi
+    if ! validate_proxy_target "$target_domain"; then
+        fail "目标地址不合法"
+        return 1
     fi
 
     local sanitized old_file new_file file site_block
@@ -1360,8 +1387,8 @@ cmd_add_gateway() {
         read -rp "请输入网关域名: " label
     fi
     label="$(trim "$label")"
-    if [[ -z "$label" ]]; then
-        fail "域名不能为空"
+    if ! validate_domain "$label"; then
+        fail "域名不合法"
         return 1
     fi
 
@@ -1603,6 +1630,10 @@ cmd_set_emby() {
         else
             new_target="${scheme}://${new_target}:8096"
         fi
+    fi
+    if ! validate_proxy_target "$new_target"; then
+        fail "目标地址不合法"
+        return 1
     fi
 
     say "新目标: ${label} → ${new_target}"

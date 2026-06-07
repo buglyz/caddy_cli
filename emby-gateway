@@ -46,11 +46,23 @@ trim_value() {
 
 validate_gateway_upstream() {
     local upstream="$1"
+    local host port
     [[ -n "$upstream" ]] || return 1
     [[ "$upstream" != *$'\r'* ]] || return 1
     [[ "$upstream" != *$'\n'* ]] || return 1
     [[ "$upstream" =~ ^[A-Za-z0-9._:-]+$ ]] || return 1
     [[ "$upstream" == *:* ]] || return 1
+    host="${upstream%:*}"
+    port="${upstream##*:}"
+    [[ -n "$host" ]] || return 1
+    [[ "$port" =~ ^[0-9]+$ ]] || return 1
+    (( 1 <= 10#$port && 10#$port <= 65535 ))
+}
+
+validate_gateway_domain() {
+    local domain="$1"
+    [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || return 1
+    [[ "$domain" == *.* ]] || return 1
 }
 
 regex_escape() {
@@ -101,7 +113,8 @@ done
 if [[ -z "$DOMAIN" ]]; then
     read -rp "请输入网关域名: " DOMAIN
 fi
-[[ -n "$DOMAIN" ]] || { echo "域名不能为空"; exit 1; }
+DOMAIN="$(trim_value "$DOMAIN")"
+validate_gateway_domain "$DOMAIN" || { echo "域名不合法"; exit 1; }
 
 if [[ -n "$ALLOW_SPEC" && "$UNSAFE_OPEN_PROXY" -eq 1 ]]; then
     echo "--allow 与 --unsafe-open-proxy 不能同时使用" >&2
