@@ -1599,10 +1599,11 @@ cmd_set_emby() {
     local label="$3"
     local query="$4"
     local override_emby_target="$5"
+    local override_scheme="$6"
 
     # Extract current target from file
     local current_target scheme label_from_file
-    current_target="$(sed -n 's/^[[:space:]]*reverse_proxy[[:space:]]\+//p' "$file" | head -n 1)"
+    current_target="$(extract_reverse_proxy_target "$file")"
     current_target="$(trim "$current_target")"
 
     if [[ -z "$current_target" ]]; then
@@ -1625,6 +1626,9 @@ cmd_set_emby() {
         fail "无法解析站点标签: $file"
         return 1
     fi
+    if [[ -n "$override_scheme" ]]; then
+        scheme="$override_scheme"
+    fi
 
     say "当前 Emby 反代: ${label} → ${current_target}"
 
@@ -1632,6 +1636,9 @@ cmd_set_emby() {
     if [[ -n "$override_emby_target" ]]; then
         new_target="$override_emby_target"
         say "使用指定目标: $new_target"
+    elif [[ -n "$override_scheme" ]]; then
+        new_target="$current_target"
+        say "保持当前目标: $new_target"
     else
         read -rp "输入新的 Emby 目标地址 (格式 example.com 或 1.2.3.4:8096): " new_target
         new_target="$(trim "$new_target")"
@@ -1725,7 +1732,7 @@ cmd_set() {
     fi
 
     if [[ "$site_type" == "Emby反代" ]]; then
-        cmd_set_emby "$file" "$site_type" "${label:-}" "$query" "$override_emby_target"
+        cmd_set_emby "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
         return $?
     fi
 

@@ -91,6 +91,17 @@ jobs:
           caddy() { return 0; }
           cmd_import "$SITES_DIR/example.com.conf"
           grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
+
+          cat > "$SITES_DIR/emby.example.com.conf" <<'EOF'
+          emby.example.com {
+              reverse_proxy https://10.0.0.5:8096 {
+                  header_up Host {upstream_hostport}
+              }
+          }
+          EOF
+          cmd_set emby.example.com --http
+          grep -q '^http://emby.example.com {' "$SITES_DIR/emby.example.com.conf"
+          grep -q 'reverse_proxy https://10.0.0.5:8096' "$SITES_DIR/emby.example.com.conf"
           BASH
 
       - name: ShellCheck
