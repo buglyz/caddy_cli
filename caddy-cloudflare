@@ -90,12 +90,12 @@ _hook_validate_args() {
 }
 
 _hook_menu_config_items() {
-    echo "10. Cloudflare DNS 管理"
+    echo "11. Cloudflare DNS 管理"
 }
 
 _hook_menu_config_handler() {
     case "$1" in
-        10) require_command caddy; with_global_lock cmd_cloudflare ;;
+        11) require_command caddy; with_global_lock cmd_cloudflare ;;
         *) return 1 ;;
     esac
 }

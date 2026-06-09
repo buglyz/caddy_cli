@@ -843,6 +843,58 @@ latest_snapshot_path() {
     printf '%s' "$latest"
 }
 
+cmd_snapshots() {
+    local limit="${1:-20}"
+    local snapshot meta action created total shown
+    local -a snapshots=()
+
+    if [[ "$limit" == "all" ]]; then
+        limit="0"
+    elif [[ ! "$limit" =~ ^[0-9]+$ ]]; then
+        fail "快照数量必须是整数或 all"
+        return 1
+    fi
+
+    if [[ ! -d "$SNAPSHOT_DIR" ]]; then
+        say "暂无回滚快照"
+        return 0
+    fi
+
+    mapfile -t snapshots < <(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r)
+    total="${#snapshots[@]}"
+    if (( total == 0 )); then
+        say "暂无回滚快照"
+        return 0
+    fi
+
+    printf '%-34s  %-18s  %s\n' "快照ID" "操作" "创建时间"
+    printf '%-34s  %-18s  %s\n' "----------------------------------" "------------------" "-------------------"
+
+    shown=0
+    for snapshot in "${snapshots[@]}"; do
+        if (( limit > 0 && shown >= limit )); then
+            break
+        fi
+
+        action="unknown"
+        created="unknown"
+        meta="$snapshot/meta"
+        if [[ -f "$meta" ]]; then
+            action="$(awk -F= '$1 == "ACTION" { print substr($0, index($0, "=") + 1); exit }' "$meta")"
+            created="$(awk -F= '$1 == "CREATED_AT" { print substr($0, index($0, "=") + 1); exit }' "$meta")"
+            action="${action:-unknown}"
+            created="${created:-unknown}"
+        fi
+
+        printf '%-34s  %-18s  %s\n' "$(basename "$snapshot")" "$action" "$created"
+        shown=$((shown + 1))
+    done
+
+    if (( limit > 0 && total > shown )); then
+        say "... 还有 $((total - shown)) 个快照未显示，使用: c snapshots all"
+    fi
+}
+
 restore_snapshot_contents() {
     local snapshot_path="$1"
 
@@ -2671,6 +2723,7 @@ cmd_show_help() {
   c timeout [秒|default]
   c upstream-mode [warn|strict]
   c import [现有Caddyfile路径]
+  c snapshots [数量|all]
   c undo [快照ID]
   c apply
   c validate
@@ -2699,6 +2752,7 @@ cmd_show_help() {
   c timeout 45
   c upstream-mode strict
   c cert-check example.com
+  c snapshots
   c undo
   c disable example.com
   c enable example.com
@@ -2951,7 +3005,8 @@ menu_config() {
     echo "6. 查看当前 Caddyfile"
     echo "7. 设置服务超时"
     echo "8. 设置上游检查模式"
-    echo "9. 回滚上一步"
+    echo "9. 查看回滚快照"
+    echo "10. 回滚上一步"
     _hook_menu_config_items
     echo "0. 返回上一级"
     echo "======================"
@@ -3015,7 +3070,8 @@ interactive_config_menu() {
             6) cmd_config ;;
             7) with_global_lock run_mutation timeout cmd_timeout ;;
             8) with_global_lock run_mutation upstream-mode cmd_upstream_mode ;;
-            9) require_command caddy; with_global_lock cmd_undo ;;
+            9) cmd_snapshots ;;
+            10) require_command caddy; with_global_lock cmd_undo ;;
             0) return 0 ;;
             *) _hook_menu_config_handler "$choice" && continue ;&
             *) fail "无效输入" ;;
@@ -3102,6 +3158,7 @@ main() {
         timeout) shift; with_global_lock run_mutation timeout cmd_timeout "${1:-}" ;;
         upstream-mode) shift; with_global_lock run_mutation upstream-mode cmd_upstream_mode "${1:-}" ;;
         import) shift; require_command caddy; with_global_lock run_mutation import cmd_import "${1:-}" ;;
+        snapshots|snapshot) shift; cmd_snapshots "${1:-20}" ;;
         apply|reload) require_command caddy; with_global_lock run_mutation apply cmd_apply ;;
         validate|check) require_command caddy; cmd_validate ;;
         cert-check) shift; cmd_cert_check "${1:-}" ;;

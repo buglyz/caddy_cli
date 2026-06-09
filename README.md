@@ -58,7 +58,9 @@ c logs
 c timeout 45                  # systemctl 超时（秒）
 c upstream-mode warn          # 上游检查模式: warn/strict
 c cert-check example.com      # 证书诊断
+c snapshots                   # 查看可回滚快照
 c undo                        # 回滚上一步
+c undo <快照ID>               # 回滚到指定快照
 c update                      # 更新脚本（前端 + 共享库）
 c doctor                      # 环境诊断
 c import /path/to/Caddyfile   # 导入现有配置
@@ -73,7 +75,7 @@ c import /path/to/Caddyfile   # 导入现有配置
 
 ## 功能特性
 
-- 写操作自动快照，可 `c undo` 回滚
+- 写操作自动快照，可 `c snapshots` 查看、`c undo [快照ID]` 回滚
 - 上游本地端口健康检查（`warn/strict`）
 - 全局并发锁，避免多终端同时修改互相覆盖
 - 配置应用前自动校验，失败自动回滚
