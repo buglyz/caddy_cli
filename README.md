@@ -41,7 +41,7 @@ c add example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
 c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
 c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
-c set example.com --port 4000 --no-log
+c set example.com --port 4000
 c enable example.com
 c disable example.com
 c rm example.com
@@ -78,7 +78,6 @@ c import /path/to/Caddyfile   # 导入现有配置
 - 全局并发锁，避免多终端同时修改互相覆盖
 - 配置应用前自动校验，失败自动回滚
 - 配置重载失败时自动降级 `restart`（兼容老 systemd）
-- 站点访问日志自动滚动（默认 `20MiB`、保留 `10` 份、保留 `720h`）
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）

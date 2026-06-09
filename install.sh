@@ -165,6 +165,9 @@ install_cli() {
     log "[${step}] Installing c command..."
 
     local tmp_lib tmp_cli
+    tmp_lib=""
+    tmp_cli=""
+    trap 'rm -f "$tmp_lib" "$tmp_cli"' RETURN
 
     tmp_lib="$(mktemp)"
     curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
@@ -182,6 +185,7 @@ install_cli() {
     install -m 0755 "$tmp_cli" "$CLI_BIN"
     ln -sf "$CLI_BIN" "$CLI_ALIAS"
     rm -f "$tmp_lib" "$tmp_cli"
+    trap - RETURN
 }
 
 init_layout_and_permissions() {
@@ -215,7 +219,7 @@ enable_and_restart_service_debian() {
 }
 
 enable_and_restart_service_alpine() {
-    log "[4/4] Enabling and starting Caddy (OpenRC)..."
+    log "[5/5] Enabling and starting Caddy (OpenRC)..."
     if ! command -v rc-service >/dev/null 2>&1; then
         log "rc-service not found, skip service startup."
         return
@@ -228,7 +232,6 @@ enable_and_restart_service_alpine() {
 
 install_debian() {
     require_command apt-get
-    require_command curl
 
     log "Starting Caddy CLI installer (Debian/Ubuntu)..."
     install_deps_debian
@@ -249,13 +252,12 @@ install_debian() {
 
 install_alpine() {
     require_command apk
-    require_command curl
 
     log "Starting Caddy CLI installer (Alpine Linux)..."
     install_deps_alpine
     install_or_keep_caddy_alpine
-    install_cli "3/4"
-    init_layout_and_permissions "3/4"
+    install_cli "3/5"
+    init_layout_and_permissions "4/5"
     enable_and_restart_service_alpine
 
     echo

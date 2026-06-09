@@ -104,6 +104,21 @@ jobs:
           grep -q 'reverse_proxy https://10.0.0.5:8096' "$SITES_DIR/emby.example.com.conf"
           BASH
 
+          bash -s <<'BASH'
+          set -euo pipefail
+          source ./caddy-lib.sh
+          validate_domain example.com
+          ! validate_domain example..com
+          ! validate_domain -bad.example.com
+          ! validate_domain bad-.example.com
+          validate_site_label 'example.com,www.example.com'
+          ! validate_site_label 'example.com; respond hacked'
+          ! validate_site_label 'example.com # comment'
+          validate_path_prefix /api
+          ! validate_path_prefix '/api { respond hacked }'
+          ! validate_path_prefix '/api # comment'
+          BASH
+
       - name: ShellCheck
         run: |
           shellcheck \

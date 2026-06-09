@@ -304,6 +304,12 @@ load_state() {
 }
 
 save_state() {
+    # Persist only validated scalar settings. Validators reject characters that
+    # would require shell-style escaping, keeping the state file simple and
+    # load_state-compatible.
+    validate_email "${EMAIL:-}" || EMAIL=""
+    validate_timeout_seconds "${SYSTEMCTL_TIMEOUT_SECONDS:-}" || SYSTEMCTL_TIMEOUT_SECONDS="$DEFAULT_SYSTEMCTL_TIMEOUT"
+    validate_upstream_check_mode "${UPSTREAM_CHECK_MODE:-}" || UPSTREAM_CHECK_MODE="$DEFAULT_UPSTREAM_CHECK_MODE"
     cat > "$STATE_FILE" <<EOF
 EMAIL="${EMAIL:-}"
 SYSTEMCTL_TIMEOUT_SECONDS="${SYSTEMCTL_TIMEOUT_SECONDS:-$DEFAULT_SYSTEMCTL_TIMEOUT}"
@@ -367,14 +373,22 @@ validate_site_label() {
     local part
     label="$(trim "$label")"
     [[ -n "$label" ]] || return 1
-    [[ "$label" != *"{"* ]] || return 1
-    [[ "$label" != *"}"* ]] || return 1
     [[ "$label" != *$'\r'* ]] || return 1
     [[ "$label" != *$'\n'* ]] || return 1
+    [[ "$label" != *"{"* ]] || return 1
+    [[ "$label" != *"}"* ]] || return 1
+    [[ "$label" != *"\""* ]] || return 1
+    [[ "$label" != *"'"* ]] || return 1
+    [[ "$label" != *";"* ]] || return 1
+    [[ "$label" != *"#"* ]] || return 1
+    [[ "$label" != *"\\"* ]] || return 1
 
     IFS=',' read -ra parts <<< "$label"
     for part in "${parts[@]}"; do
-        [[ -n "$(trim "$part")" ]] || return 1
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || return 1
+        [[ "$part" != *[[:space:]]* ]] || return 1
+        validate_domain "$part" || return 1
     done
     return 0
 }
@@ -385,11 +399,27 @@ validate_port() {
 
 validate_email() {
     [[ -z "$1" ]] && return 0 # 允许空值用于清除 email
+    [[ "$1" != *"\""* ]] || return 1
+    [[ "$1" != *"'"* ]] || return 1
+    [[ "$1" != *"\\"* ]] || return 1
     [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
 }
 
 validate_domain() {
-    [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] && [[ "$1" == *.* ]]
+    local domain="$1"
+    local label
+    [[ -n "$domain" ]] || return 1
+    [[ ${#domain} -le 253 ]] || return 1
+    [[ "$domain" == *.* ]] || return 1
+    [[ "$domain" != *..* ]] || return 1
+    [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+    IFS='.' read -ra labels <<< "$domain"
+    for label in "${labels[@]}"; do
+        [[ -n "$label" ]] || return 1
+        [[ ${#label} -le 63 ]] || return 1
+        [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+    done
+    return 0
 }
 
 validate_static_dir() {
@@ -412,9 +442,14 @@ validate_path_prefix() {
     [[ -n "$prefix" ]] || return 1
     [[ "$prefix" == /* ]] || return 1
     [[ "$prefix" != "/" ]] || return 1
-    [[ "$prefix" != *" "* ]] || return 1
-    [[ "$prefix" != *$'\r'* ]] || return 1
-    [[ "$prefix" != *$'\n'* ]] || return 1
+    [[ "$prefix" != *[[:space:]]* ]] || return 1
+    [[ "$prefix" != *"{"* ]] || return 1
+    [[ "$prefix" != *"}"* ]] || return 1
+    [[ "$prefix" != *"\""* ]] || return 1
+    [[ "$prefix" != *"'"* ]] || return 1
+    [[ "$prefix" != *";"* ]] || return 1
+    [[ "$prefix" != *"#"* ]] || return 1
+    [[ "$prefix" != *"\\"* ]] || return 1
     return 0
 }
 
@@ -2682,8 +2717,7 @@ restore_import_snapshot() {
     cp -a "$sites_bak"/. "$SITES_DIR"/ 2>/dev/null || true
     cp -a "$globals_bak"/. "$GLOBALS_DIR"/ 2>/dev/null || true
     cp -a "$state_bak" "$STATE_FILE" 2>/dev/null || true
-    EMAIL="$old_email"
-    save_state
+    load_state
     fix_permissions
 }
 
@@ -2747,6 +2781,27 @@ def strip_comments(s: str) -> str:
             esc = False
     return "".join(out)
 
+def brace_countable(s: str) -> str:
+    out = []
+    in_sq = False
+    in_dq = False
+    esc = False
+    for ch in s:
+        if ch == "#" and not in_sq and not in_dq:
+            break
+        if (in_sq or in_dq) and ch in "{}":
+            out.append(" ")
+        else:
+            out.append(ch)
+        if ch == '"' and not in_sq and not esc:
+            in_dq = not in_dq
+        elif ch == "'" and not in_dq and not esc:
+            in_sq = not in_sq
+        esc = (ch == "\\" and not esc)
+        if ch != "\\":
+            esc = False
+    return "".join(out)
+
 blocks = []
 buf = []
 depth = 0
@@ -2754,12 +2809,13 @@ started = False
 
 for line in lines:
     clean = strip_comments(line)
+    counted = brace_countable(line)
     if not started and clean.strip() == "":
         continue
     if not started:
         started = True
     buf.append(line)
-    depth += clean.count("{") - clean.count("}")
+    depth += counted.count("{") - counted.count("}")
     if started and depth == 0 and buf:
         blocks.append(buf)
         buf = []
