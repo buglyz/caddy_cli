@@ -398,11 +398,24 @@ validate_port() {
 }
 
 validate_email() {
-    [[ -z "$1" ]] && return 0 # 允许空值用于清除 email
-    [[ "$1" != *"\""* ]] || return 1
-    [[ "$1" != *"'"* ]] || return 1
-    [[ "$1" != *"\\"* ]] || return 1
-    [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+    local email="$1"
+    local local_part domain_part
+
+    [[ -z "$email" ]] && return 0 # 允许空值用于清除 email
+    [[ "$email" != *$'\r'* ]] || return 1
+    [[ "$email" != *$'\n'* ]] || return 1
+    [[ "$email" != *[[:space:]]* ]] || return 1
+    [[ "$email" == *@* ]] || return 1
+    [[ "$email" != *@*@* ]] || return 1
+
+    local_part="${email%@*}"
+    domain_part="${email#*@}"
+    [[ -n "$local_part" && -n "$domain_part" ]] || return 1
+    [[ ${#local_part} -le 64 ]] || return 1
+    [[ "$local_part" =~ ^[A-Za-z0-9._%+-]+$ ]] || return 1
+    [[ "$local_part" != .* && "$local_part" != *. ]] || return 1
+    [[ "$local_part" != *..* ]] || return 1
+    validate_domain "$domain_part"
 }
 
 validate_domain() {
@@ -2881,7 +2894,7 @@ if buf:
 global_lines = []
 site_blocks = []
 found_email = ""
-email_re = re.compile(r"^\s*email\s+(\S+)")
+email_re = re.compile(r"^\s*email\s+(\S+)\s*$")
 
 for block in blocks:
     first = next((strip_comments(x).strip() for x in block if strip_comments(x).strip()), "")
@@ -2895,10 +2908,14 @@ for block in blocks:
             if not raw.strip():
                 global_lines.append("")
                 continue
-            match = email_re.match(raw)
+            uncommented = strip_comments(raw).strip()
+            match = email_re.match(uncommented)
             if match and not found_email:
-                found_email = match.group(1)
+                found_email = match.group(1).strip()
                 continue
+            if re.match(r"^email(\s|$)", uncommented):
+                print(f"Invalid global email directive: {raw.strip()}", file=sys.stderr)
+                sys.exit(1)
             global_lines.append(raw)
     else:
         site_blocks.append(block)
@@ -2933,8 +2950,7 @@ for block in site_blocks:
                 n += 1
     path.write_text("\n".join(block).rstrip() + "\n", encoding="utf-8")
 
-if found_email:
-    print(f"EMAIL={found_email}")
+print(f"EMAIL={found_email}")
 PY
     )" || {
         fail "导入失败，正在回滚目录。"
@@ -2945,7 +2961,18 @@ PY
 
     if [[ "$meta" =~ ^EMAIL=(.*)$ ]]; then
         EMAIL="${BASH_REMATCH[1]}"
+        if ! validate_email "$EMAIL"; then
+            fail "导入的全局 email 不合法: $EMAIL"
+            restore_import_snapshot "$sites_bak" "$globals_bak" "$state_bak" "$old_email"
+            cleanup_paths "$sites_bak" "$globals_bak" "$tmp_src" "$state_bak"
+            return 1
+        fi
         save_state
+    else
+        fail "导入元数据缺少 EMAIL 字段"
+        restore_import_snapshot "$sites_bak" "$globals_bak" "$state_bak" "$old_email"
+        cleanup_paths "$sites_bak" "$globals_bak" "$tmp_src" "$state_bak"
+        return 1
     fi
 
     if ! apply_config; then
