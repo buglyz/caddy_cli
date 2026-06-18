@@ -118,6 +118,21 @@ jobs:
           cmd_set_gateway gate.example.com --allow 10.0.0.6:8096 --https
           grep -q '仅允许: 10.0.0.6:8096' "$SITES_DIR/gate.example.com.conf"
           grep -q '^https://gate.example.com {' "$SITES_DIR/gate.example.com.conf"
+          if cmd_set_gateway gate.example.com --allow 10.0.0.6:8096 --unsafe-open-proxy >/tmp/gateway_conflict1.out 2>/tmp/gateway_conflict1.err; then
+              echo "set-gateway should reject --allow followed by --unsafe-open-proxy" >&2
+              exit 1
+          fi
+          grep -q -- '--allow 与 --unsafe-open-proxy 不能同时使用' /tmp/gateway_conflict1.err
+          if cmd_set_gateway gate.example.com --unsafe-open-proxy --allow 10.0.0.6:8096 >/tmp/gateway_conflict2.out 2>/tmp/gateway_conflict2.err; then
+              echo "set-gateway should reject --unsafe-open-proxy followed by --allow" >&2
+              exit 1
+          fi
+          grep -q -- '--allow 与 --unsafe-open-proxy 不能同时使用' /tmp/gateway_conflict2.err
+          if cmd_set gate.example.com >/tmp/gateway_set.out 2>/tmp/gateway_set.err; then
+              echo "cmd_set should reject gateway configs with a dedicated hint" >&2
+              exit 1
+          fi
+          grep -q 'c set-gateway gate.example.com' /tmp/gateway_set.err
 
           local_ip_addresses() { printf '%s\n' 203.0.113.10; }
           public_ip_addresses() { :; }
@@ -146,6 +161,8 @@ jobs:
           validate_path_prefix /api
           ! validate_path_prefix '/api { respond hacked }'
           ! validate_path_prefix '/api # comment'
+          test "$(normalize_ip_address 2001:0db8:0000:0000:0000:ff00:0042:8329)" = "2001:db8::ff00:42:8329"
+          ! looks_like_ip_address 8.8.8.8:53
           BASH
 
       - name: ShellCheck

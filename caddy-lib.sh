@@ -442,29 +442,56 @@ is_truthy() {
     esac
 }
 
-looks_like_ip_address() {
+normalize_ip_address() {
     local ip="$1"
     local octet
     local -a octets=()
+    local -a numbers=()
 
+    ip="${ip%%%*}"
     [[ -n "$ip" ]] || return 1
-    if [[ "$ip" == *:* ]]; then
-        [[ "$ip" =~ ^[0-9A-Fa-f:.]+$ ]]
+
+    if command_exists python3; then
+        python3 - "$ip" <<'PY'
+import ipaddress
+import sys
+
+try:
+    print(ipaddress.ip_address(sys.argv[1]).compressed.lower())
+except ValueError:
+    sys.exit(1)
+PY
         return $?
+    fi
+
+    if [[ "$ip" == *:* ]]; then
+        [[ "$ip" != *.* ]] || return 1
+        [[ "$ip" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
+        [[ "$ip" == *[0-9A-Fa-f]* ]] || return 1
+        printf '%s\n' "${ip,,}"
+        return 0
     fi
 
     [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
     IFS='.' read -ra octets <<< "$ip"
     for octet in "${octets[@]}"; do
         (( 0 <= 10#$octet && 10#$octet <= 255 )) || return 1
+        numbers+=("$((10#$octet))")
     done
+    printf '%s.%s.%s.%s\n' "${numbers[0]}" "${numbers[1]}" "${numbers[2]}" "${numbers[3]}"
     return 0
+}
+
+looks_like_ip_address() {
+    normalize_ip_address "$1" >/dev/null 2>&1
 }
 
 ip_is_public_candidate() {
     local ip="$1"
+    local normalized
 
-    looks_like_ip_address "$ip" || return 1
+    normalized="$(normalize_ip_address "$ip" 2>/dev/null)" || return 1
+    ip="$normalized"
     case "$ip" in
         127.*|10.*|169.254.*|192.168.*|0.*|255.*) return 1 ;;
         172.*)
@@ -529,6 +556,10 @@ public_ip_addresses() {
     fi
 }
 
+dns_resolver_available() {
+    command_exists getent || command_exists dig || command_exists host || command_exists nslookup
+}
+
 resolve_domain_addresses() {
     local domain="$1"
 
@@ -543,7 +574,8 @@ resolve_domain_addresses() {
         host "$domain" 2>/dev/null | awk '/ has address / { print $4 } / has IPv6 address / { print $5 }'
     fi
     if command_exists nslookup; then
-        nslookup "$domain" 2>/dev/null | awk '/^Address: / { print $2 }'
+        nslookup "$domain" 2>/dev/null \
+            | awk 'BEGIN { answer=0 } /^Name:/ { answer=1; next } answer && /^Address([[:space:]][0-9]+)?:[[:space:]]/ { print $NF }'
     fi
 }
 
@@ -555,7 +587,7 @@ join_by_comma() {
 check_domain_points_to_local() {
     local domain="$1"
     local resolved_ips local_ips
-    local ip local_ip
+    local ip local_ip normalized
     local found=0
     local -a resolved=()
     local -a locals=()
@@ -563,25 +595,27 @@ check_domain_points_to_local() {
     domain="$(trim "$domain")"
     [[ -n "$domain" ]] || return 1
 
-    while IFS= read -r ip; do
-        ip="${ip%%%*}"
-        looks_like_ip_address "$ip" || continue
-        ip="${ip,,}"
-        resolved+=("$ip")
-    done < <(resolve_domain_addresses "$domain" | awk 'NF' | sort -u)
-
-    if (( ${#resolved[@]} == 0 )); then
-        fail "域名未解析到任何 A/AAAA 记录: $domain"
-        say "请确认 DNS 生效后重试；内网/测试场景可加 --skip-dns-check。"
+    if ! dns_resolver_available; then
+        fail "缺少 DNS 查询工具，不能确认域名解析是否指向本机: $domain"
+        say "请安装 getent、dig、host 或 nslookup 后重试；内网、测试或 Cloudflare 代理场景可加 --skip-dns-check。"
         return 1
     fi
 
     while IFS= read -r ip; do
-        ip="${ip%%%*}"
-        looks_like_ip_address "$ip" || continue
-        ip="${ip,,}"
-        locals+=("$ip")
-    done < <(local_ip_addresses | awk 'NF' | sort -u)
+        normalized="$(normalize_ip_address "$ip" 2>/dev/null)" || continue
+        resolved+=("$normalized")
+    done < <(resolve_domain_addresses "$domain" | awk 'NF')
+
+    if (( ${#resolved[@]} == 0 )); then
+        fail "域名未解析到任何 A/AAAA 记录: $domain"
+        say "请确认 DNS 生效后重试；内网、测试或 Cloudflare 代理场景可加 --skip-dns-check。"
+        return 1
+    fi
+
+    while IFS= read -r ip; do
+        normalized="$(normalize_ip_address "$ip" 2>/dev/null)" || continue
+        locals+=("$normalized")
+    done < <(local_ip_addresses | awk 'NF')
 
     for ip in "${resolved[@]}"; do
         for local_ip in "${locals[@]}"; do
@@ -597,11 +631,9 @@ check_domain_points_to_local() {
     fi
 
     while IFS= read -r ip; do
-        ip="${ip%%%*}"
-        looks_like_ip_address "$ip" || continue
-        ip="${ip,,}"
-        locals+=("$ip")
-    done < <(public_ip_addresses | awk 'NF' | sort -u)
+        normalized="$(normalize_ip_address "$ip" 2>/dev/null)" || continue
+        locals+=("$normalized")
+    done < <(public_ip_addresses | awk 'NF')
 
     for ip in "${resolved[@]}"; do
         for local_ip in "${locals[@]}"; do
@@ -618,7 +650,7 @@ check_domain_points_to_local() {
 
     if (( ${#locals[@]} == 0 )); then
         fail "无法获取本机 IP，不能确认域名解析是否指向本机: $domain"
-        say "内网/测试场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
+        say "内网、测试或 Cloudflare 代理场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
         return 1
     fi
 
@@ -627,7 +659,7 @@ check_domain_points_to_local() {
     fail "域名未解析到本机: $domain"
     say "域名解析结果: ${resolved_ips:-<无>}"
     say "本机 IP: ${local_ips:-<未知>}"
-    say "请将 DNS A/AAAA 记录指向本机后重试；内网/测试场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
+    say "请将 DNS A/AAAA 记录指向本机后重试；内网、测试或 Cloudflare 代理场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
     return 1
 }
 
@@ -2101,6 +2133,10 @@ cmd_set() {
         cmd_set_emby "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
         return $?
     fi
+    if [[ "$site_type" == "网关" ]]; then
+        fail "该配置是通用反代网关，请使用: c set-gateway $query [--allow <host:port,...>|--unsafe-open-proxy] [--http|--https]"
+        return 1
+    fi
 
     if ! label="$(extract_primary_site_label_from_file "$file")"; then
         fail "无法解析站点标签"
@@ -2206,18 +2242,31 @@ cmd_set_gateway() {
     local allow_spec="__keep__"
     local allow_regex=""
     local unsafe_open_proxy=0
+    local allow_seen=0
+    local unsafe_seen=0
+    local scheme_seen=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --http|--no-ssl) scheme="http" ;;
-            --https) scheme="https" ;;
+            --http|--no-ssl) scheme="http"; scheme_seen=1 ;;
+            --https) scheme="https"; scheme_seen=1 ;;
             --allow)
                 shift
                 [[ $# -gt 0 ]] || { fail "--allow 需要 host:port 列表"; return 1; }
+                if (( unsafe_seen )); then
+                    fail "--allow 与 --unsafe-open-proxy 不能同时使用"
+                    return 1
+                fi
+                allow_seen=1
                 allow_spec="$1"
                 ;;
             --unsafe-open-proxy)
+                if (( allow_seen )); then
+                    fail "--allow 与 --unsafe-open-proxy 不能同时使用"
+                    return 1
+                fi
+                unsafe_seen=1
                 unsafe_open_proxy=1
                 allow_spec=""
                 ;;
@@ -2259,6 +2308,11 @@ cmd_set_gateway() {
     [[ -n "$scheme" ]] || scheme="$current_scheme"
 
     current_allow="$(extract_gateway_allow_spec "$file")"
+    if (( allow_seen == 0 && unsafe_seen == 0 && scheme_seen == 0 )) && [[ -t 0 ]]; then
+        if ! prompt_gateway_edit_values "$label" "$current_allow" "$current_scheme" allow_spec unsafe_open_proxy scheme; then
+            return 1
+        fi
+    fi
     if [[ "$allow_spec" == "__keep__" ]]; then
         allow_spec="$current_allow"
         if [[ -z "$allow_spec" ]]; then
@@ -2304,6 +2358,50 @@ cmd_set_gateway() {
     else
         say "警告: 当前网关为开放动态代理，请确保外部已有认证或网络隔离。"
     fi
+}
+
+prompt_gateway_edit_values() {
+    local label="$1"
+    local current_allow="$2"
+    local current_scheme="$3"
+    local allow_var="$4"
+    local unsafe_var="$5"
+    local scheme_var="$6"
+    local input selected_allow selected_scheme unsafe_selected=0
+
+    say "当前网关: $label"
+    say "当前协议: ${current_scheme:-https}"
+    if [[ -n "$current_allow" ]]; then
+        say "当前允许上游: $current_allow"
+    else
+        say "当前允许上游: 任意上游（开放动态代理）"
+    fi
+
+    read -rp "新的 allow-list（host:port,多个用逗号；回车保留；输入 open 改为开放代理）: " input || return 1
+    input="$(trim "$input")"
+    case "${input,,}" in
+        "") selected_allow="__keep__" ;;
+        open|unsafe|any|all)
+            selected_allow=""
+            unsafe_selected=1
+            ;;
+        *) selected_allow="$input" ;;
+    esac
+
+    read -rp "协议 [https/http，回车保留 ${current_scheme:-https}]: " selected_scheme || return 1
+    selected_scheme="$(trim "$selected_scheme")"
+    case "${selected_scheme,,}" in
+        "") selected_scheme="${current_scheme:-https}" ;;
+        http|https) selected_scheme="${selected_scheme,,}" ;;
+        *)
+            fail "协议只能是 http 或 https"
+            return 1
+            ;;
+    esac
+
+    printf -v "$allow_var" '%s' "$selected_allow"
+    printf -v "$unsafe_var" '%s' "$unsafe_selected"
+    printf -v "$scheme_var" '%s' "$selected_scheme"
 }
 
 cmd_rm_emby() {

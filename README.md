@@ -14,12 +14,12 @@
 
 **标准版：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r8/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r9/install.sh)
 ```
 
 **Cloudflare DNS 版（自动申请泛域名证书）：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r8/install-cloudflare.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r9/install-cloudflare.sh)
 ```
 
 > Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
@@ -109,7 +109,8 @@ c update
 
 ## 供应链与安全
 
-- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r8`，并校验同 tag 下的 `checksums.txt`。
+- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r9`，并校验同 tag 下的 `checksums.txt`。
+- Cloudflare 版会优先下载 GitHub Release 里的预编译 `caddy` 资产；若资产不可用，会回退到同 tag 的仓库文件和 jsDelivr CDN，并继续执行 checksum 校验。
 - `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
 - Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
 - 本地共享库缺失时，CLI 默认不再在线 `source` 远程代码；临时救急可设置 `CADDYCTL_ALLOW_REMOTE_LIB=1`。
