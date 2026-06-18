@@ -14,12 +14,12 @@
 
 **标准版：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r7/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r8/install.sh)
 ```
 
 **Cloudflare DNS 版（自动申请泛域名证书）：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r7/install-cloudflare.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r8/install-cloudflare.sh)
 ```
 
 > Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
@@ -53,6 +53,7 @@ c add-emby lan.example.com http://10.0.0.5:8096 --http
 c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
 c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
 c set-emby emby.example.com --target https://10.0.0.6:8096
+c set-gateway gate.example.com --allow 10.0.0.6:8096 --https
 c rm-emby emby.example.com
 
 # 配置与全局设置
@@ -104,11 +105,11 @@ c update
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
-- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由
+- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
 
 ## 供应链与安全
 
-- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r7`，并校验同 tag 下的 `checksums.txt`。
+- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r8`，并校验同 tag 下的 `checksums.txt`。
 - `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
 - Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
 - 本地共享库缺失时，CLI 默认不再在线 `source` 远程代码；临时救急可设置 `CADDYCTL_ALLOW_REMOTE_LIB=1`。

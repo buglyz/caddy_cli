@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r7}"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r8}"
 readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
 readonly CLI_URL="${CADDY_CLI_URL:-${CADDY_CLI_BASE_URL}/caddy.sh}"
 readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"

@@ -732,6 +732,23 @@ gateway_allow_regex() {
     printf '%s' "$out"
 }
 
+extract_gateway_allow_spec() {
+    local file="$1"
+    sed -n 's/^# 上游限制: 仅允许: //p' "$file" | head -n 1
+}
+
+extract_gateway_scheme() {
+    local file="$1"
+    local label
+
+    label="$(extract_primary_site_label_from_file "$file" 2>/dev/null || true)"
+    if [[ "$label" == http://* ]]; then
+        printf '%s' "http"
+    else
+        printf '%s' "https"
+    fi
+}
+
 normalize_path_prefix() {
     local prefix
     prefix="$(trim "$1")"
@@ -2183,6 +2200,112 @@ cmd_set_emby_site() {
     cmd_set "${args[@]}"
 }
 
+cmd_set_gateway() {
+    local query=""
+    local scheme=""
+    local allow_spec="__keep__"
+    local allow_regex=""
+    local unsafe_open_proxy=0
+    local -a positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --http|--no-ssl) scheme="http" ;;
+            --https) scheme="https" ;;
+            --allow)
+                shift
+                [[ $# -gt 0 ]] || { fail "--allow 需要 host:port 列表"; return 1; }
+                allow_spec="$1"
+                ;;
+            --unsafe-open-proxy)
+                unsafe_open_proxy=1
+                allow_spec=""
+                ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 set-gateway 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    query="${positional[0]:-}"
+
+    if [[ -z "$query" ]]; then
+        read -rp "输入要修改的网关域名: " query
+    fi
+    query="$(trim "$query")"
+    if [[ -z "$query" ]]; then
+        fail "网关域名不能为空"
+        return 1
+    fi
+
+    local file site_type label current_allow current_scheme site_block oldbak
+    if ! file="$(find_site_file "$query")"; then
+        fail "未找到该网关配置"
+        return 1
+    fi
+    site_type="$(detect_site_type "$file")"
+    if [[ "$site_type" != "网关" ]]; then
+        fail "该配置不是通用反代网关: $query（当前类型: $site_type）"
+        return 1
+    fi
+    if ! label="$(extract_primary_site_label_from_file "$file")"; then
+        fail "无法解析网关域名"
+        return 1
+    fi
+    label="${label#http://}"
+    label="${label#https://}"
+
+    current_scheme="$(extract_gateway_scheme "$file")"
+    [[ -n "$scheme" ]] || scheme="$current_scheme"
+
+    current_allow="$(extract_gateway_allow_spec "$file")"
+    if [[ "$allow_spec" == "__keep__" ]]; then
+        allow_spec="$current_allow"
+        if [[ -z "$allow_spec" ]]; then
+            unsafe_open_proxy=1
+        fi
+    fi
+    allow_spec="$(trim "$allow_spec")"
+
+    if [[ -n "$allow_spec" && "$unsafe_open_proxy" -eq 1 ]]; then
+        fail "--allow 与 --unsafe-open-proxy 不能同时使用"
+        return 1
+    fi
+    if [[ -z "$allow_spec" && "$unsafe_open_proxy" -ne 1 ]]; then
+        if prompt_yes_no "未配置 allow-list 会创建开放动态代理，确认继续"; then
+            unsafe_open_proxy=1
+        else
+            fail "set-gateway 默认需要 --allow <host:port,...>。确需开放任意上游时使用 --unsafe-open-proxy。"
+            return 1
+        fi
+    fi
+    if [[ -n "$allow_spec" ]]; then
+        allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
+    fi
+
+    site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
+    oldbak="$(backup_file_if_exists "$file")"
+    printf '%s\n' "$site_block" > "$file"
+
+    if is_site_enabled "$file"; then
+        if ! write_site_file_with_rollback "$file" "$oldbak"; then
+            fail "已回滚网关修改"
+            return 1
+        fi
+        say "已更新通用反代网关: $label"
+    else
+        chmod 644 "$file"
+        chown root:caddy "$file" 2>/dev/null || true
+        cleanup_paths "$oldbak"
+        say "已更新禁用网关（未生效）: $label"
+    fi
+    if [[ -n "$allow_spec" ]]; then
+        say "允许上游: $allow_spec"
+    else
+        say "警告: 当前网关为开放动态代理，请确保外部已有认证或网络隔离。"
+    fi
+}
+
 cmd_rm_emby() {
     local query="${1:-}"
     if [[ -z "$query" ]]; then
@@ -3065,6 +3188,7 @@ Emby 管理:
   c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl] [--skip-dns-check]
   c add-gateway <域名> --unsafe-open-proxy [--no-ssl] [--skip-dns-check]
   c set-emby <Emby域名> [--target <地址>] [--http|--https]
+  c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https]
   c rm-emby <Emby域名或网关域名>
 
 添加域名反代时会检查域名 A/AAAA 是否解析到本机 IP。
@@ -3122,6 +3246,7 @@ EOF
   c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
   c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
   c set-emby emby.example.com --target https://10.0.0.6:8096
+  c set-gateway gate.example.com --allow 10.0.0.6:8096 --https
 
   # 配置与全局设置
   c timeout 45
@@ -3393,7 +3518,8 @@ menu_emby() {
     echo "2. 添加 Emby 固定反代"
     echo "3. 添加 Emby 通用网关"
     echo "4. 修改 Emby 固定反代"
-    echo "5. 删除 Emby 配置"
+    echo "5. 修改 Emby 通用网关"
+    echo "6. 删除 Emby 配置"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -3478,7 +3604,8 @@ interactive_emby_menu() {
             2) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
             3) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
             4) require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby_site ;;
-            5) require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby ;;
+            5) require_command caddy; with_global_lock run_mutation set-gateway cmd_set_gateway ;;
+            6) require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3609,6 +3736,7 @@ main() {
         add-gateway|gateway) shift; require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway "$@" ;;
         list-emby|emby-list) shift; cmd_list_emby "$@" ;;
         set-emby) shift; require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby_site "$@" ;;
+        set-gateway) shift; require_command caddy; with_global_lock run_mutation set-gateway cmd_set_gateway "$@" ;;
         rm-emby|del-emby|delete-emby) shift; require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby "$@" ;;
         set) shift; require_command caddy; with_global_lock run_mutation set cmd_set "$@" ;;
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
