@@ -10,7 +10,9 @@ ALLOW_SPEC=""
 ALLOW_REGEX=""
 UNSAFE_OPEN_PROXY=0
 CADDY_SITES_DIR="${CADDY_SITES_DIR:-/etc/caddy/sites.d}"
+CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
 CONF_FILE=""
+CONF_BACKUP=""
 
 usage() {
     cat <<'EOF'
@@ -132,10 +134,27 @@ fi
 SAFE_DOMAIN="$(printf '%s' "$DOMAIN" | tr '/: ,' '____' | tr -cd 'A-Za-z0-9._-')"
 [[ -n "$SAFE_DOMAIN" ]] || { echo "域名不合法"; exit 1; }
 CONF_FILE="$CADDY_SITES_DIR/${SAFE_DOMAIN}.conf"
+mkdir -p "$CADDY_SITES_DIR"
+
+rollback_conf() {
+    if [[ -n "${CONF_BACKUP:-}" && -f "$CONF_BACKUP" ]]; then
+        mv "$CONF_BACKUP" "$CONF_FILE"
+    else
+        rm -f "$CONF_FILE"
+    fi
+}
+
+cleanup_backup() {
+    if [[ -n "${CONF_BACKUP:-}" ]]; then
+        rm -f "$CONF_BACKUP"
+    fi
+}
 
 if [[ -f "$CONF_FILE" ]]; then
     read -rp "站点 $DOMAIN 已存在，覆盖？[y/N]: " CONFIRM
     [[ "${CONFIRM,,}" == "y" ]] || exit 0
+    CONF_BACKUP="$(mktemp)"
+    cp -a "$CONF_FILE" "$CONF_BACKUP"
 fi
 
 echo "正在生成 Caddy 配置: $CONF_FILE"
@@ -269,24 +288,36 @@ echo "配置已写入: $CONF_FILE"
 # ── 校验并重载 ──
 if [[ "$CADDY_SITES_DIR" != "/etc/caddy/sites.d" ]]; then
     echo "检测到自定义 CADDY_SITES_DIR，跳过系统校验与重载。"
-elif command -v caddy &>/dev/null; then
-    echo "校验 Caddy 配置..."
-    if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1 | grep -q 'Valid'; then
-        echo "配置校验通过，重载 Caddy..."
-        if command -v c &>/dev/null && c apply &>/dev/null; then
-            echo "已通过 caddy-cli 重载"
-        else
-            systemctl reload caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-            echo "已重载 Caddy"
-        fi
+    cleanup_backup
+elif command -v c &>/dev/null; then
+    echo "通过 caddy-cli 校验并应用配置..."
+    if c apply; then
+        echo "已通过 caddy-cli 重载"
+        cleanup_backup
     else
+        echo "caddy-cli 应用失败，已回滚: $CONF_FILE" >&2
+        rollback_conf
+        exit 1
+    fi
+elif command -v caddy &>/dev/null; then
+    echo "未检测到 caddy-cli，校验并重载当前 Caddyfile: $CADDYFILE"
+    echo "请确认 $CADDYFILE 已导入 $CADDY_SITES_DIR/*.conf，否则新网关不会被加载。"
+    echo "校验 Caddy 配置..."
+    if caddy validate --config "$CADDYFILE" --adapter caddyfile 2>&1 | tail -1 | grep -q 'Valid'; then
+        echo "配置校验通过，重载 Caddy..."
+        systemctl reload caddy 2>/dev/null || caddy reload --config "$CADDYFILE" --adapter caddyfile
+        echo "已重载 Caddy"
+        cleanup_backup
+    else
+        rollback_conf
         echo "⚠ 配置校验失败，请检查: $CONF_FILE"
-        caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1
+        caddy validate --config "$CADDYFILE" --adapter caddyfile 2>&1
         exit 1
     fi
 else
     echo "⚠ 未检测到 caddy，配置已生成但未重载"
     echo "   安装 Caddy 后执行: systemctl reload caddy"
+    cleanup_backup
 fi
 
 echo

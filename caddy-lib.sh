@@ -1512,13 +1512,22 @@ cmd_add_gateway() {
         return 1
     fi
 
+    if [[ -z "$allow_spec" && "$unsafe_open_proxy" -ne 1 ]]; then
+        read -rp "允许的上游 host:port 列表（多个用逗号分隔；留空则需确认开放代理）: " allow_spec || true
+        allow_spec="$(trim "$allow_spec")"
+    fi
+
     if [[ -n "$allow_spec" && "$unsafe_open_proxy" -eq 1 ]]; then
         fail "--allow 与 --unsafe-open-proxy 不能同时使用"
         return 1
     fi
     if [[ -z "$allow_spec" && "$unsafe_open_proxy" -ne 1 ]]; then
-        fail "add-gateway 默认需要 --allow <host:port,...>，避免创建公网开放代理。确需开放任意上游时使用 --unsafe-open-proxy。"
-        return 1
+        if prompt_yes_no "未配置 allow-list 会创建开放动态代理，确认继续"; then
+            unsafe_open_proxy=1
+        else
+            fail "add-gateway 默认需要 --allow <host:port,...>，避免创建公网开放代理。确需开放任意上游时使用 --unsafe-open-proxy。"
+            return 1
+        fi
     fi
     if [[ -n "$allow_spec" ]]; then
         allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
