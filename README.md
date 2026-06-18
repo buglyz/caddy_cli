@@ -40,13 +40,20 @@ c list
 c add example.com 3000
 c add example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
-c add-emby emby.example.com https://10.0.0.5:8096
-c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
-c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
+c add lan.example.com 3000 --skip-dns-check
 c set example.com --port 4000
 c enable example.com
 c disable example.com
 c rm example.com
+
+# Emby 管理
+c list-emby
+c add-emby emby.example.com https://10.0.0.5:8096
+c add-emby lan.example.com http://10.0.0.5:8096 --http
+c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
+c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
+c set-emby emby.example.com --target https://10.0.0.6:8096
+c rm-emby emby.example.com
 
 # 配置与全局设置
 c email admin@example.com
@@ -90,6 +97,7 @@ c update
 
 - 写操作自动快照，可 `c snapshots` 查看、`c undo [快照ID]` 回滚
 - 上游本地端口健康检查（`warn/strict`）
+- 添加域名反代前会检查 DNS A/AAAA 是否解析到本机 IP，可用 `--skip-dns-check` 跳过
 - 全局并发锁，避免多终端同时修改互相覆盖
 - 配置应用前自动校验，失败自动回滚
 - 配置重载失败时自动降级 `restart`（兼容老 systemd）

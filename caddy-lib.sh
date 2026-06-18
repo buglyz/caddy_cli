@@ -435,6 +435,222 @@ validate_domain() {
     return 0
 }
 
+is_truthy() {
+    case "${1:-}" in
+        1|true|TRUE|yes|YES|on|ON) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+looks_like_ip_address() {
+    local ip="$1"
+    local octet
+    local -a octets=()
+
+    [[ -n "$ip" ]] || return 1
+    if [[ "$ip" == *:* ]]; then
+        [[ "$ip" =~ ^[0-9A-Fa-f:.]+$ ]]
+        return $?
+    fi
+
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        (( 0 <= 10#$octet && 10#$octet <= 255 )) || return 1
+    done
+    return 0
+}
+
+ip_is_public_candidate() {
+    local ip="$1"
+
+    looks_like_ip_address "$ip" || return 1
+    case "$ip" in
+        127.*|10.*|169.254.*|192.168.*|0.*|255.*) return 1 ;;
+        172.*)
+            local second="${ip#172.}"
+            second="${second%%.*}"
+            if [[ "$second" =~ ^[0-9]+$ ]] && (( 16 <= 10#$second && 10#$second <= 31 )); then
+                return 1
+            fi
+            ;;
+        ::1|fe80:*|fc*|fd*) return 1 ;;
+    esac
+    return 0
+}
+
+local_ip_addresses() {
+    local token ip
+
+    printf '%s\n' 127.0.0.1 ::1
+    if command_exists hostname; then
+        for token in $(hostname -I 2>/dev/null || true); do
+            token="${token%%%*}"
+            [[ -n "$token" ]] && printf '%s\n' "$token"
+        done
+    fi
+    if command_exists ip; then
+        while IFS= read -r ip; do
+            ip="${ip%%/*}"
+            ip="${ip%%%*}"
+            [[ -n "$ip" ]] && printf '%s\n' "$ip"
+        done < <(ip -o addr show scope global 2>/dev/null | awk '{ print $4 }')
+        while IFS= read -r ip; do
+            ip="${ip%%/*}"
+            ip="${ip%%%*}"
+            [[ -n "$ip" ]] && printf '%s\n' "$ip"
+        done < <(ip -o addr show scope host 2>/dev/null | awk '{ print $4 }')
+    fi
+}
+
+public_ip_addresses() {
+    local ip url
+
+    if command_exists curl; then
+        for url in \
+            "https://api.ipify.org" \
+            "https://ifconfig.me/ip" \
+            "https://icanhazip.com"; do
+            ip="$(curl -4fsS --max-time 3 "$url" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [[ -n "$ip" ]] && ip_is_public_candidate "$ip"; then
+                printf '%s\n' "$ip"
+                break
+            fi
+        done
+        for url in \
+            "https://api64.ipify.org" \
+            "https://icanhazip.com"; do
+            ip="$(curl -6fsS --max-time 3 "$url" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [[ -n "$ip" ]] && ip_is_public_candidate "$ip"; then
+                printf '%s\n' "$ip"
+                break
+            fi
+        done
+    fi
+}
+
+resolve_domain_addresses() {
+    local domain="$1"
+
+    if command_exists getent; then
+        getent ahosts "$domain" 2>/dev/null | awk '{ print $1 }'
+    fi
+    if command_exists dig; then
+        dig +short A "$domain" 2>/dev/null
+        dig +short AAAA "$domain" 2>/dev/null
+    fi
+    if command_exists host; then
+        host "$domain" 2>/dev/null | awk '/ has address / { print $4 } / has IPv6 address / { print $5 }'
+    fi
+    if command_exists nslookup; then
+        nslookup "$domain" 2>/dev/null | awk '/^Address: / { print $2 }'
+    fi
+}
+
+join_by_comma() {
+    local IFS=", "
+    printf '%s' "$*"
+}
+
+check_domain_points_to_local() {
+    local domain="$1"
+    local resolved_ips local_ips
+    local ip local_ip
+    local found=0
+    local -a resolved=()
+    local -a locals=()
+
+    domain="$(trim "$domain")"
+    [[ -n "$domain" ]] || return 1
+
+    while IFS= read -r ip; do
+        ip="${ip%%%*}"
+        looks_like_ip_address "$ip" || continue
+        ip="${ip,,}"
+        resolved+=("$ip")
+    done < <(resolve_domain_addresses "$domain" | awk 'NF' | sort -u)
+
+    if (( ${#resolved[@]} == 0 )); then
+        fail "域名未解析到任何 A/AAAA 记录: $domain"
+        say "请确认 DNS 生效后重试；内网/测试场景可加 --skip-dns-check。"
+        return 1
+    fi
+
+    while IFS= read -r ip; do
+        ip="${ip%%%*}"
+        looks_like_ip_address "$ip" || continue
+        ip="${ip,,}"
+        locals+=("$ip")
+    done < <(local_ip_addresses | awk 'NF' | sort -u)
+
+    for ip in "${resolved[@]}"; do
+        for local_ip in "${locals[@]}"; do
+            if [[ "$ip" == "$local_ip" ]]; then
+                found=1
+                break 2
+            fi
+        done
+    done
+
+    if (( found )); then
+        return 0
+    fi
+
+    while IFS= read -r ip; do
+        ip="${ip%%%*}"
+        looks_like_ip_address "$ip" || continue
+        ip="${ip,,}"
+        locals+=("$ip")
+    done < <(public_ip_addresses | awk 'NF' | sort -u)
+
+    for ip in "${resolved[@]}"; do
+        for local_ip in "${locals[@]}"; do
+            if [[ "$ip" == "$local_ip" ]]; then
+                found=1
+                break 2
+            fi
+        done
+    done
+
+    if (( found )); then
+        return 0
+    fi
+
+    if (( ${#locals[@]} == 0 )); then
+        fail "无法获取本机 IP，不能确认域名解析是否指向本机: $domain"
+        say "内网/测试场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
+        return 1
+    fi
+
+    resolved_ips="$(join_by_comma "${resolved[@]}")"
+    local_ips="$(join_by_comma "${locals[@]}")"
+    fail "域名未解析到本机: $domain"
+    say "域名解析结果: ${resolved_ips:-<无>}"
+    say "本机 IP: ${local_ips:-<未知>}"
+    say "请将 DNS A/AAAA 记录指向本机后重试；内网/测试场景可加 --skip-dns-check 或设置 CADDYCTL_SKIP_DNS_CHECK=1。"
+    return 1
+}
+
+check_site_dns_points_to_local() {
+    local label="$1"
+    local part
+    local -a parts=()
+
+    if is_truthy "${CADDYCTL_SKIP_DNS_CHECK:-0}"; then
+        return 0
+    fi
+
+    IFS=',' read -ra parts <<< "$label"
+    for part in "${parts[@]}"; do
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        if ! check_domain_points_to_local "$part"; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 validate_static_dir() {
     local dir="$1"
     [[ -n "$dir" ]] || return 1
@@ -1412,11 +1628,13 @@ cmd_add_emby() {
     local label=""
     local target_domain=""
     local scheme="https"
+    local skip_dns_check=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --http) scheme="http" ;;
+            --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-emby 参数: $1"; return 1 ;;
             *) positional+=("$1") ;;
@@ -1466,6 +1684,12 @@ cmd_add_emby() {
         fi
     done
 
+    if (( skip_dns_check == 0 )); then
+        if ! check_site_dns_points_to_local "$label"; then
+            return 1
+        fi
+    fi
+
     site_block="$(build_emby_site_block "$label" "$target_domain" "$scheme")"
     ensure_dirs
     write_site_file "$new_file" "$label" "$site_block"
@@ -1484,11 +1708,13 @@ cmd_add_gateway() {
     local allow_spec=""
     local allow_regex=""
     local unsafe_open_proxy=0
+    local skip_dns_check=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-ssl|--http) scheme="http" ;;
+            --skip-dns-check) skip_dns_check=1 ;;
             --allow)
                 shift
                 [[ $# -gt 0 ]] || { fail "--allow 需要 host:port 列表"; return 1; }
@@ -1546,6 +1772,12 @@ cmd_add_gateway() {
         fi
     done
 
+    if (( skip_dns_check == 0 )); then
+        if ! check_site_dns_points_to_local "$label"; then
+            return 1
+        fi
+    fi
+
     site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     ensure_dirs
     write_site_file "$new_file" "$label" "$site_block"
@@ -1569,6 +1801,7 @@ cmd_add() {
     local scheme="https"
     local path_prefix=""
     local force_dns_tls=0
+    local skip_dns_check=0
     local -a positional=()
 
     while (( $# > 0 )); do
@@ -1576,6 +1809,7 @@ cmd_add() {
             --http) scheme="http" ;;
             --https) scheme="https" ;;
             --dns-only) force_dns_tls=1 ;;
+            --skip-dns-check) skip_dns_check=1 ;;
             --path)
                 shift
                 [[ $# -gt 0 ]] || { fail "--path 需要一个前缀"; return 1; }
@@ -1618,6 +1852,12 @@ cmd_add() {
 
     local file oldbak=""
     file="$(site_path_for_label "$label")"
+
+    if (( skip_dns_check == 0 )); then
+        if ! check_site_dns_points_to_local "$label"; then
+            return 1
+        fi
+    fi
     oldbak="$(backup_file_if_exists "$file")"
 
     # --dns-only: force DNS-01 even if cloudflare_dns_ready check fails
@@ -1915,6 +2155,62 @@ cmd_set() {
     fi
 }
 
+cmd_set_emby_site() {
+    local query="${1:-}"
+    local -a args=("$@")
+    if [[ -z "$query" ]]; then
+        read -rp "输入要修改的 Emby 反代域名: " query
+        args=("$query")
+    fi
+    query="$(trim "$query")"
+    if [[ -z "$query" ]]; then
+        fail "Emby 反代域名不能为空"
+        return 1
+    fi
+    args[0]="$query"
+
+    local file site_type
+    if ! file="$(find_site_file "$query")"; then
+        fail "未找到该 Emby 反代"
+        return 1
+    fi
+    site_type="$(detect_site_type "$file")"
+    if [[ "$site_type" != "Emby反代" ]]; then
+        fail "该配置不是 Emby 固定反代: $query（当前类型: $site_type）"
+        return 1
+    fi
+
+    cmd_set "${args[@]}"
+}
+
+cmd_rm_emby() {
+    local query="${1:-}"
+    if [[ -z "$query" ]]; then
+        read -rp "输入要删除的 Emby 配置域名: " query
+    fi
+    query="$(trim "$query")"
+    if [[ -z "$query" ]]; then
+        fail "Emby 配置域名不能为空"
+        return 1
+    fi
+
+    local file site_type
+    if ! file="$(find_site_file "$query")"; then
+        fail "未找到该 Emby 配置"
+        return 1
+    fi
+    site_type="$(detect_site_type "$file")"
+    case "$site_type" in
+        "Emby反代"|"网关") ;;
+        *)
+            fail "该配置不是 Emby 配置: $query（当前类型: $site_type）"
+            return 1
+            ;;
+    esac
+
+    cmd_rm "$query"
+}
+
 find_site_file() {
     local query="$1"
     local normalized basename_no_ext f
@@ -2011,6 +2307,14 @@ site_summary() {
             echo "摘要: 未识别"
             ;;
     esac
+}
+
+print_site_entry() {
+    local file="$1"
+    echo "---- $(basename "$file") [$(detect_site_type "$file") / $(site_file_status "$file")] ----"
+    site_summary "$file"
+    sed -n '1,80p' "$file"
+    echo
 }
 
 extract_primary_site_label_from_file() {
@@ -2121,10 +2425,7 @@ cmd_list() {
         echo "暂无"
     else
         for f in "${sfiles[@]}"; do
-            echo "---- $(basename "$f") [$(detect_site_type "$f") / $(site_file_status "$f")] ----"
-            site_summary "$f"
-            sed -n '1,80p' "$f"
-            echo
+            print_site_entry "$f"
         done
     fi
     shopt -u nullglob
@@ -2137,13 +2438,33 @@ cmd_list() {
         echo "暂无"
     else
         for f in "${disabled_files[@]}"; do
-            echo "---- $(basename "$f") [$(detect_site_type "$f") / $(site_file_status "$f")] ----"
-            site_summary "$f"
-            sed -n '1,80p' "$f"
-            echo
+            print_site_entry "$f"
         done
     fi
     shopt -u nullglob
+}
+
+cmd_list_emby() {
+    local file type found=0
+
+    echo "===== Emby 配置 ====="
+    shopt -s nullglob
+    local files=("$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled)
+    for file in "${files[@]}"; do
+        [[ -s "$file" ]] || continue
+        type="$(detect_site_type "$file")"
+        case "$type" in
+            "Emby反代"|"网关")
+                print_site_entry "$file"
+                found=1
+                ;;
+        esac
+    done
+    shopt -u nullglob
+
+    if (( found == 0 )); then
+        echo "暂无"
+    fi
 }
 
 cmd_email() {
@@ -2731,15 +3052,23 @@ cmd_show_help() {
 
 站点管理:
   c list
-  c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only]
+  c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only] [--skip-dns-check]
   c add-static <域名> <目录> [--spa]
-  c add-emby <域名> <目标地址> [--http]
-  c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl]
-  c add-gateway <域名> --unsafe-open-proxy [--no-ssl]
-  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
+  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
   c enable <域名>
   c disable <域名>
   c rm <域名>
+
+Emby 管理:
+  c list-emby
+  c add-emby <域名> <目标地址> [--http] [--skip-dns-check]
+  c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl] [--skip-dns-check]
+  c add-gateway <域名> --unsafe-open-proxy [--no-ssl] [--skip-dns-check]
+  c set-emby <Emby域名> [--target <地址>] [--http|--https]
+  c rm-emby <Emby域名或网关域名>
+
+添加域名反代时会检查域名 A/AAAA 是否解析到本机 IP。
+内网、测试域名或 Cloudflare 代理场景可加 --skip-dns-check，或设置 CADDYCTL_SKIP_DNS_CHECK=1。
 
 配置与全局设置:
   c email [邮箱]
@@ -2780,15 +3109,19 @@ EOF
   c add example.com 3000
   c add example.com 3000 --path /api
   c add example.com 3000 --dns-only
+  c add lan.example.com 3000 --skip-dns-check
   c add-static static.example.com /var/www/site --spa
+  c set example.com --port 4000
+  c disable example.com
+  c enable example.com
+
+  # Emby 管理
+  c list-emby
   c add-emby emby.example.com https://10.0.0.5:8096
   c add-emby lan.example.com http://10.0.0.5:8096 --http
   c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
-  c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
-  c set example.com --port 4000
-  c set emby.example.com --target https://10.0.0.6:8096
-  c disable example.com
-  c enable example.com
+  c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
+  c set-emby emby.example.com --target https://10.0.0.6:8096
 
   # 配置与全局设置
   c timeout 45
@@ -3031,11 +3364,12 @@ show_menu_header() {
 menu_main() {
     show_menu_header "Caddy CLI 管理面板"
     echo "1. 站点管理"
-    echo "2. 配置与全局设置"
-    echo "3. 服务控制"
-    echo "4. 诊断与日志"
-    echo "5. 备份与回滚"
-    echo "6. 安装与更新"
+    echo "2. Emby 管理"
+    echo "3. 配置与全局设置"
+    echo "4. 服务控制"
+    echo "5. 诊断与日志"
+    echo "6. 备份与回滚"
+    echo "7. 安装与更新"
     echo "0. 退出"
     echo "============================"
 }
@@ -3045,12 +3379,21 @@ menu_sites() {
     echo "1. 查看站点列表"
     echo "2. 添加本地反代"
     echo "3. 添加静态站点"
-    echo "4. 添加 Emby 固定反代"
-    echo "5. 添加通用反代网关"
-    echo "6. 修改站点配置"
-    echo "7. 启用站点"
-    echo "8. 禁用站点"
-    echo "9. 删除站点"
+    echo "4. 修改站点配置"
+    echo "5. 启用站点"
+    echo "6. 禁用站点"
+    echo "7. 删除站点"
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_emby() {
+    show_menu_header "Emby 管理"
+    echo "1. 查看 Emby 配置"
+    echo "2. 添加 Emby 固定反代"
+    echo "3. 添加 Emby 通用网关"
+    echo "4. 修改 Emby 固定反代"
+    echo "5. 删除 Emby 配置"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -3114,12 +3457,28 @@ interactive_sites_menu() {
             1) cmd_list ;;
             2) require_command caddy; with_global_lock run_mutation add cmd_add ;;
             3) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
-            4) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
-            5) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
-            6) require_command caddy; with_global_lock run_mutation set cmd_set ;;
-            7) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
-            8) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
-            9) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
+            4) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            5) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
+            6) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
+            7) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_emby_menu() {
+    local choice=""
+    while true; do
+        menu_emby
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_list_emby ;;
+            2) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
+            3) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
+            4) require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby_site ;;
+            5) require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3219,11 +3578,12 @@ interactive_menu() {
         read -rp "选择: " choice
         case "$choice" in
             1) interactive_sites_menu ;;
-            2) interactive_config_menu ;;
-            3) interactive_service_menu ;;
-            4) interactive_diagnostics_menu ;;
-            5) interactive_backup_menu ;;
-            6) interactive_install_menu ;;
+            2) interactive_emby_menu ;;
+            3) interactive_config_menu ;;
+            4) interactive_service_menu ;;
+            5) interactive_diagnostics_menu ;;
+            6) interactive_backup_menu ;;
+            7) interactive_install_menu ;;
             0) exit 0 ;;
             *) fail "无效输入"; pause_menu ;;
         esac
@@ -3247,6 +3607,9 @@ main() {
         add-static|static) shift; require_command caddy; with_global_lock run_mutation add-static cmd_add_static "$@" ;;
         add-emby|emby) shift; require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby "$@" ;;
         add-gateway|gateway) shift; require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway "$@" ;;
+        list-emby|emby-list) shift; cmd_list_emby "$@" ;;
+        set-emby) shift; require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby_site "$@" ;;
+        rm-emby|del-emby|delete-emby) shift; require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby "$@" ;;
         set) shift; require_command caddy; with_global_lock run_mutation set cmd_set "$@" ;;
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
         enable) shift; require_command caddy; with_global_lock run_mutation enable cmd_enable "${1:-}" ;;
