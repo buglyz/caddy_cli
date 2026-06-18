@@ -35,35 +35,46 @@ sudo c help     # 命令行模式
 ## 常用命令
 
 ```bash
-# 站点管理
+# 站点与反代
+c list
 c add example.com 3000
 c add example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
+c add-emby emby.example.com https://10.0.0.5:8096
 c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
 c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
 c set example.com --port 4000
 c enable example.com
 c disable example.com
 c rm example.com
-c list
 
-# 配置与服务
+# 配置与校验
+c email admin@example.com
+c import /path/to/Caddyfile
+c config
 c validate
 c apply
-c start / restart / stop
+c timeout 45
+c upstream-mode warn
+
+# 服务与日志
 c status
 c logs
+c start
+c restart
+c stop
+c cert-check example.com
 
-# 工具
-c timeout 45                  # systemctl 超时（秒）
-c upstream-mode warn          # 上游检查模式: warn/strict
-c cert-check example.com      # 证书诊断
-c snapshots                   # 查看可回滚快照
-c undo                        # 回滚上一步
-c undo <快照ID>               # 回滚到指定快照
-c update                      # 更新脚本（前端 + 共享库）
-c doctor                      # 环境诊断
-c import /path/to/Caddyfile   # 导入现有配置
+# 备份与回滚
+c snapshots
+c undo
+c undo <快照ID>
+
+# 安装与诊断
+c doctor
+c install
+c install-self
+c update
 ```
 
 ## Cloudflare DNS 版额外功能

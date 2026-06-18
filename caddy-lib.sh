@@ -2727,39 +2727,51 @@ cmd_install() {
 cmd_show_help() {
     cat <<'EOF'
 用法:
-  c install
-  c install-self
-  c update
-  c doctor
+  c <命令> [参数]
+
+站点与反代:
+  c list
   c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only]
   c add-static <域名> <目录> [--spa]
   c add-emby <域名> <目标地址> [--http]
   c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl]
   c add-gateway <域名> --unsafe-open-proxy [--no-ssl]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--target <地址>]
-  c rm <域名>
   c enable <域名>
   c disable <域名>
-  c list
+  c rm <域名>
+
+配置与校验:
   c email [邮箱]
+  c import [现有Caddyfile路径]
+  c config
+  c validate
+  c apply
   c timeout [秒|default]
   c upstream-mode [warn|strict]
-  c import [现有Caddyfile路径]
-  c snapshots [数量|all]
-  c undo [快照ID]
-  c apply
-  c validate
-  c cert-check <域名>
+
+服务与日志:
   c status
   c logs
-  c config
   c start
   c restart
   c stop
+  c cert-check <域名>
+
+备份与回滚:
+  c snapshots [数量|all]
+  c undo [快照ID]
+
+安装与诊断:
+  c doctor
+  c install
+  c install-self
+  c update
   c menu
 
 （别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby, gateway=add-gateway）
 示例:
+  # 站点与反代
   c add example.com 3000
   c add example.com 3000 --path /api
   c add example.com 3000 --dns-only
@@ -2768,14 +2780,18 @@ cmd_show_help() {
   c add-emby lan.example.com http://10.0.0.5:8096 --http
   c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
   c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
-  c update
   c set example.com --port 4000
   c set emby.example.com --target https://10.0.0.6:8096
+
+  # 配置与校验
   c timeout 45
   c upstream-mode strict
   c cert-check example.com
+
+  # 备份、安装与诊断
   c snapshots
   c undo
+  c update
   c disable example.com
   c enable example.com
 EOF
@@ -3008,63 +3024,69 @@ show_menu_header() {
 
 menu_main() {
     show_menu_header "Caddy CLI 管理面板"
-    echo "1. 站点管理"
-    echo "2. 配置管理"
-    echo "3. 服务管理"
-    echo "4. 安装与诊断"
+    echo "1. 站点与反代"
+    echo "2. 配置与校验"
+    echo "3. 服务与日志"
+    echo "4. 备份与回滚"
+    echo "5. 安装与诊断"
     echo "0. 退出"
     echo "============================"
 }
 
 menu_sites() {
-    show_menu_header "站点管理"
-    echo "1. 添加反代站点"
-    echo "2. 添加静态站点"
-    echo "3. 添加 Emby 反代"
-    echo "4. 添加通用反代网关"
-    echo "5. 删除站点"
-    echo "6. 启用站点"
-    echo "7. 禁用站点"
-    echo "8. 查看站点列表"
-    echo "9. 修改站点配置"
+    show_menu_header "站点与反代"
+    echo "1. 查看站点列表"
+    echo "2. 添加本地反代"
+    echo "3. 添加静态站点"
+    echo "4. 添加 Emby 固定反代"
+    echo "5. 添加通用反代网关"
+    echo "6. 修改站点配置"
+    echo "7. 启用站点"
+    echo "8. 禁用站点"
+    echo "9. 删除站点"
     echo "0. 返回上一级"
     echo "======================"
 }
 
 menu_config() {
-    show_menu_header "配置管理"
-    echo "1. 查看配置列表"
+    show_menu_header "配置与校验"
+    echo "1. 查看当前 Caddyfile"
     echo "2. 设置邮箱"
     echo "3. 导入现有配置"
-    echo "4. 仅校验配置"
-    echo "5. 应用配置"
-    echo "6. 查看当前 Caddyfile"
-    echo "7. 设置服务超时"
-    echo "8. 设置上游检查模式"
-    echo "9. 查看回滚快照"
-    echo "10. 回滚上一步"
+    echo "4. 校验配置"
+    echo "5. 应用/重载配置"
+    echo "6. 设置服务超时"
+    echo "7. 设置上游检查模式"
     _hook_menu_config_items
     echo "0. 返回上一级"
     echo "======================"
 }
 
 menu_service() {
-    show_menu_header "服务管理"
-    echo "1. 查看状态"
-    echo "2. 查看日志"
-    echo "3. 启动 Caddy"
-    echo "4. 停止 Caddy"
+    show_menu_header "服务与日志"
+    echo "1. 查看服务状态"
+    echo "2. 查看 Caddy 日志"
+    echo "3. 证书诊断"
+    echo "4. 启动 Caddy"
     echo "5. 重启 Caddy"
-    echo "6. 证书诊断"
+    echo "6. 停止 Caddy"
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_backup() {
+    show_menu_header "备份与回滚"
+    echo "1. 查看回滚快照"
+    echo "2. 回滚上一步"
     echo "0. 返回上一级"
     echo "======================"
 }
 
 menu_install() {
     show_menu_header "安装与诊断"
-    echo "1. 安装/初始化 Caddy"
-    echo "2. 安装当前脚本命令"
-    echo "3. 环境检查"
+    echo "1. 环境检查"
+    echo "2. 安装/初始化 Caddy"
+    echo "3. 安装当前脚本命令"
     echo "4. 更新当前脚本"
     echo "0. 返回上一级"
     echo "======================"
@@ -3076,15 +3098,15 @@ interactive_sites_menu() {
         menu_sites
         read -rp "选择: " choice
         case "$choice" in
-            1) require_command caddy; with_global_lock run_mutation add cmd_add ;;
-            2) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
-            3) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
-            4) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
-            5) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
-            6) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
-            7) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
-            8) cmd_list ;;
-            9) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            1) cmd_list ;;
+            2) require_command caddy; with_global_lock run_mutation add cmd_add ;;
+            3) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
+            4) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
+            5) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
+            6) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            7) require_command caddy; with_global_lock run_mutation enable cmd_enable ;;
+            8) require_command caddy; with_global_lock run_mutation disable cmd_disable ;;
+            9) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3098,16 +3120,13 @@ interactive_config_menu() {
         menu_config
         read -rp "选择: " choice
         case "$choice" in
-            1) cmd_list ;;
+            1) cmd_config ;;
             2) require_command caddy; with_global_lock run_mutation email cmd_email ;;
             3) require_command caddy; with_global_lock run_mutation import cmd_import ;;
             4) require_command caddy; cmd_validate ;;
             5) require_command caddy; with_global_lock run_mutation apply cmd_apply ;;
-            6) cmd_config ;;
-            7) with_global_lock run_mutation timeout cmd_timeout ;;
-            8) with_global_lock run_mutation upstream-mode cmd_upstream_mode ;;
-            9) cmd_snapshots ;;
-            10) require_command caddy; with_global_lock cmd_undo ;;
+            6) with_global_lock run_mutation timeout cmd_timeout ;;
+            7) with_global_lock run_mutation upstream-mode cmd_upstream_mode ;;
             0) return 0 ;;
             *) _hook_menu_config_handler "$choice" && continue ;&
             *) fail "无效输入" ;;
@@ -3124,10 +3143,25 @@ interactive_service_menu() {
         case "$choice" in
             1) cmd_status ;;
             2) cmd_logs ;;
-            3) with_global_lock cmd_start ;;
-            4) with_global_lock cmd_stop ;;
+            3) cmd_cert_check ;;
+            4) with_global_lock cmd_start ;;
             5) with_global_lock cmd_restart ;;
-            6) cmd_cert_check ;;
+            6) with_global_lock cmd_stop ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_backup_menu() {
+    local choice=""
+    while true; do
+        menu_backup
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_snapshots ;;
+            2) require_command caddy; with_global_lock cmd_undo ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3141,9 +3175,9 @@ interactive_install_menu() {
         menu_install
         read -rp "选择: " choice
         case "$choice" in
-            1) with_global_lock cmd_install ;;
-            2) with_global_lock cmd_install_self ;;
-            3) cmd_doctor ;;
+            1) cmd_doctor ;;
+            2) with_global_lock cmd_install ;;
+            3) with_global_lock cmd_install_self ;;
             4) with_global_lock cmd_update ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
@@ -3161,7 +3195,8 @@ interactive_menu() {
             1) interactive_sites_menu ;;
             2) interactive_config_menu ;;
             3) interactive_service_menu ;;
-            4) interactive_install_menu ;;
+            4) interactive_backup_menu ;;
+            5) interactive_install_menu ;;
             0) exit 0 ;;
             *) fail "无效输入"; pause_menu ;;
         esac

@@ -90,12 +90,12 @@ _hook_validate_args() {
 }
 
 _hook_menu_config_items() {
-    echo "11. Cloudflare DNS 管理"
+    echo "8. Cloudflare DNS 管理"
 }
 
 _hook_menu_config_handler() {
     case "$1" in
-        11) require_command caddy; with_global_lock cmd_cloudflare ;;
+        8) require_command caddy; with_global_lock cmd_cloudflare ;;
         *) return 1 ;;
     esac
 }
@@ -148,6 +148,7 @@ _hook_cmd_doctor() {
 
 _hook_help_extra() {
     cat <<'EOF'
+Cloudflare DNS:
   c cloudflare set        配置 Cloudflare API Token（隐藏输入）
   c cloudflare check      检查 Cloudflare DNS 就绪状态
   c cloudflare remove     删除 Cloudflare 配置
