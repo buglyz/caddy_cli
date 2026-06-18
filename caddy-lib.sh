@@ -2729,7 +2729,7 @@ cmd_show_help() {
 用法:
   c <命令> [参数]
 
-站点与反代:
+站点管理:
   c list
   c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only]
   c add-static <域名> <目录> [--spa]
@@ -2741,7 +2741,7 @@ cmd_show_help() {
   c disable <域名>
   c rm <域名>
 
-配置与校验:
+配置与全局设置:
   c email [邮箱]
   c import [现有Caddyfile路径]
   c config
@@ -2749,21 +2749,26 @@ cmd_show_help() {
   c apply
   c timeout [秒|default]
   c upstream-mode [warn|strict]
+EOF
+    _hook_help_extra
+    cat <<'EOF'
 
-服务与日志:
-  c status
-  c logs
+服务控制:
   c start
   c restart
   c stop
+
+诊断与日志:
+  c doctor
+  c status
+  c logs
   c cert-check <域名>
 
 备份与回滚:
   c snapshots [数量|all]
   c undo [快照ID]
 
-安装与诊断:
-  c doctor
+安装与更新:
   c install
   c install-self
   c update
@@ -2771,7 +2776,7 @@ cmd_show_help() {
 
 （别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby, gateway=add-gateway）
 示例:
-  # 站点与反代
+  # 站点管理
   c add example.com 3000
   c add example.com 3000 --path /api
   c add example.com 3000 --dns-only
@@ -2782,20 +2787,21 @@ cmd_show_help() {
   c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl
   c set example.com --port 4000
   c set emby.example.com --target https://10.0.0.6:8096
+  c disable example.com
+  c enable example.com
 
-  # 配置与校验
+  # 配置与全局设置
   c timeout 45
   c upstream-mode strict
+
+  # 诊断与日志
   c cert-check example.com
 
-  # 备份、安装与诊断
+  # 备份与更新
   c snapshots
   c undo
   c update
-  c disable example.com
-  c enable example.com
 EOF
-    _hook_help_extra
 }
 
 restore_import_snapshot() {
@@ -3024,17 +3030,18 @@ show_menu_header() {
 
 menu_main() {
     show_menu_header "Caddy CLI 管理面板"
-    echo "1. 站点与反代"
-    echo "2. 配置与校验"
-    echo "3. 服务与日志"
-    echo "4. 备份与回滚"
-    echo "5. 安装与诊断"
+    echo "1. 站点管理"
+    echo "2. 配置与全局设置"
+    echo "3. 服务控制"
+    echo "4. 诊断与日志"
+    echo "5. 备份与回滚"
+    echo "6. 安装与更新"
     echo "0. 退出"
     echo "============================"
 }
 
 menu_sites() {
-    show_menu_header "站点与反代"
+    show_menu_header "站点管理"
     echo "1. 查看站点列表"
     echo "2. 添加本地反代"
     echo "3. 添加静态站点"
@@ -3049,7 +3056,7 @@ menu_sites() {
 }
 
 menu_config() {
-    show_menu_header "配置与校验"
+    show_menu_header "配置与全局设置"
     echo "1. 查看当前 Caddyfile"
     echo "2. 设置邮箱"
     echo "3. 导入现有配置"
@@ -3063,13 +3070,20 @@ menu_config() {
 }
 
 menu_service() {
-    show_menu_header "服务与日志"
-    echo "1. 查看服务状态"
-    echo "2. 查看 Caddy 日志"
-    echo "3. 证书诊断"
-    echo "4. 启动 Caddy"
-    echo "5. 重启 Caddy"
-    echo "6. 停止 Caddy"
+    show_menu_header "服务控制"
+    echo "1. 启动 Caddy"
+    echo "2. 重启 Caddy"
+    echo "3. 停止 Caddy"
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_diagnostics() {
+    show_menu_header "诊断与日志"
+    echo "1. 环境检查"
+    echo "2. 查看服务状态"
+    echo "3. 查看 Caddy 日志"
+    echo "4. 证书诊断"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -3083,11 +3097,10 @@ menu_backup() {
 }
 
 menu_install() {
-    show_menu_header "安装与诊断"
-    echo "1. 环境检查"
-    echo "2. 安装/初始化 Caddy"
-    echo "3. 安装当前脚本命令"
-    echo "4. 更新当前脚本"
+    show_menu_header "安装与更新"
+    echo "1. 安装/初始化 Caddy"
+    echo "2. 安装当前脚本命令"
+    echo "3. 更新当前脚本"
     echo "0. 返回上一级"
     echo "======================"
 }
@@ -3141,12 +3154,26 @@ interactive_service_menu() {
         menu_service
         read -rp "选择: " choice
         case "$choice" in
-            1) cmd_status ;;
-            2) cmd_logs ;;
-            3) cmd_cert_check ;;
-            4) with_global_lock cmd_start ;;
-            5) with_global_lock cmd_restart ;;
-            6) with_global_lock cmd_stop ;;
+            1) with_global_lock cmd_start ;;
+            2) with_global_lock cmd_restart ;;
+            3) with_global_lock cmd_stop ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_diagnostics_menu() {
+    local choice=""
+    while true; do
+        menu_diagnostics
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_doctor ;;
+            2) cmd_status ;;
+            3) cmd_logs ;;
+            4) cmd_cert_check ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3175,10 +3202,9 @@ interactive_install_menu() {
         menu_install
         read -rp "选择: " choice
         case "$choice" in
-            1) cmd_doctor ;;
-            2) with_global_lock cmd_install ;;
-            3) with_global_lock cmd_install_self ;;
-            4) with_global_lock cmd_update ;;
+            1) with_global_lock cmd_install ;;
+            2) with_global_lock cmd_install_self ;;
+            3) with_global_lock cmd_update ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
@@ -3195,8 +3221,9 @@ interactive_menu() {
             1) interactive_sites_menu ;;
             2) interactive_config_menu ;;
             3) interactive_service_menu ;;
-            4) interactive_backup_menu ;;
-            5) interactive_install_menu ;;
+            4) interactive_diagnostics_menu ;;
+            5) interactive_backup_menu ;;
+            6) interactive_install_menu ;;
             0) exit 0 ;;
             *) fail "无效输入"; pause_menu ;;
         esac

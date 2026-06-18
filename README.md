@@ -35,7 +35,7 @@ sudo c help     # 命令行模式
 ## 常用命令
 
 ```bash
-# 站点与反代
+# 站点管理
 c list
 c add example.com 3000
 c add example.com 3000 --path /api
@@ -48,7 +48,7 @@ c enable example.com
 c disable example.com
 c rm example.com
 
-# 配置与校验
+# 配置与全局设置
 c email admin@example.com
 c import /path/to/Caddyfile
 c config
@@ -57,12 +57,15 @@ c apply
 c timeout 45
 c upstream-mode warn
 
-# 服务与日志
-c status
-c logs
+# 服务控制
 c start
 c restart
 c stop
+
+# 诊断与日志
+c doctor
+c status
+c logs
 c cert-check example.com
 
 # 备份与回滚
@@ -70,8 +73,7 @@ c snapshots
 c undo
 c undo <快照ID>
 
-# 安装与诊断
-c doctor
+# 安装与更新
 c install
 c install-self
 c update
