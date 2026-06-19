@@ -224,6 +224,16 @@ jobs:
           resolve_domain_addresses() { printf '%s\n' 203.0.113.10; }
           cmd_add ok.example.com 3000 --skip-dns-check
           test -s "$SITES_DIR/ok.example.com.conf"
+
+          resolve_domain_addresses() { printf '%s\n' 198.51.100.20; }
+          if cmd_add_static blocked-static.example.com /var/www/static --spa >/tmp/cmd_static_blocked.out 2>/tmp/cmd_static_blocked.err; then
+              echo "cmd_add_static should have failed on DNS mismatch" >&2
+              exit 1
+          fi
+          grep -q '域名未解析到本机' /tmp/cmd_static_blocked.err
+
+          cmd_add_static ok-static.example.com /var/www/static --spa --skip-dns-check
+          test -s "$SITES_DIR/ok-static.example.com.conf"
           BASH
 
           bash -s <<'BASH'

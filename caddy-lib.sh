@@ -2495,11 +2495,13 @@ cmd_add_static() {
     local label=""
     local site_dir=""
     local spa_mode="off"
+    local skip_dns_check=0
     local -a positional=()
 
     while (( $# > 0 )); do
         case "$1" in
             --spa) spa_mode="on" ;;
+            --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-static 参数: $1"; return 1 ;;
             *) positional+=("$1") ;;
@@ -2534,6 +2536,13 @@ cmd_add_static() {
 
     local file oldbak=""
     file="$(site_path_for_label "$label")"
+
+    if (( skip_dns_check == 0 )); then
+        if ! check_site_dns_points_to_local "$label"; then
+            return 1
+        fi
+    fi
+
     oldbak="$(backup_file_if_exists "$file")"
 
     build_static_site_block "$label" "$site_dir" "$spa_mode" > "$file"
@@ -3880,7 +3889,7 @@ cmd_show_help() {
 站点管理:
   c list
   c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only] [--skip-dns-check]
-  c add-static <域名> <目录> [--spa]
+  c add-static <域名> <目录> [--spa] [--skip-dns-check]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
   c enable <域名>
   c disable <域名>
@@ -3939,6 +3948,7 @@ EOF
   c add example.com 3000 --dns-only
   c add lan.example.com 3000 --skip-dns-check
   c add-static static.example.com /var/www/site --spa
+  c add-static lan-static.example.com /var/www/site --skip-dns-check
   c set example.com --port 4000
   c disable example.com
   c enable example.com
