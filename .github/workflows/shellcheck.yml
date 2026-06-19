@@ -62,6 +62,73 @@ jobs:
           bash -c 'source ./caddy-lib.sh; build_static_site_block static.example.com "/var/www/site with spaces" on' > "$tmp"
           ./caddy validate --config "$tmp" --adapter caddyfile
 
+      - name: Doctor parser smoke tests
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          nginxdir="$(mktemp -d)"
+          trap 'rm -f "$tmp"; rm -rf "$nginxdir"' EXIT
+          bash -s "$tmp" "$nginxdir" <<'BASH'
+          set -euo pipefail
+          caddyfile="$1"
+          nginxdir="$2"
+          source ./caddy-lib.sh
+
+          cat > "$caddyfile" <<'EOF'
+          a.example.com, https://b.example.com {
+              reverse_proxy {
+                  to 127.0.0.1:1111 localhost:2222
+                  transport http
+              }
+          }
+
+          http://c.example.com {
+              reverse_proxy @api http://127.0.0.1:3333 {
+                  header_up Host {upstream_hostport}
+              }
+          }
+
+          :8080 {
+              respond "ok"
+          }
+
+          (snippet) {
+              encode gzip
+          }
+          EOF
+
+          cat > "$nginxdir/sites.conf" <<'EOF'
+          server {
+              server_name a.example.com b.example.com;
+              proxy_ssl_server_name on;
+          }
+          server {
+              server_name c.example.com _;
+          }
+          EOF
+
+          targets="$(extract_reverse_proxy_targets "$caddyfile" | sort | tr '\n' ' ')"
+          [[ "$targets" == *"127.0.0.1:1111"* ]]
+          [[ "$targets" == *"localhost:2222"* ]]
+          [[ "$targets" == *"http://127.0.0.1:3333"* ]]
+          [[ "$targets" != *"@api"* ]]
+
+          labels="$(extract_caddy_site_labels "$caddyfile" | while IFS= read -r label; do normalize_site_name "$label" 2>/dev/null || true; done | sort | tr '\n' ' ')"
+          [[ "$labels" == *"a.example.com"* ]]
+          [[ "$labels" == *"b.example.com"* ]]
+          [[ "$labels" == *"c.example.com"* ]]
+          [[ "$labels" != *":8080"* ]]
+
+          nginx_names="$(extract_nginx_server_names "$nginxdir" | while IFS= read -r label; do normalize_site_name "$label" 2>/dev/null || true; done | sort | tr '\n' ' ')"
+          [[ "$nginx_names" == *"a.example.com"* ]]
+          [[ "$nginx_names" == *"b.example.com"* ]]
+          [[ "$nginx_names" == *"c.example.com"* ]]
+          [[ "$nginx_names" != *"proxy_ssl_server_name"* ]]
+
+          coverage="$(report_nginx_migration_coverage "$nginxdir" "$caddyfile")"
+          grep -Fq '[OK] nginx server_name 已全部出现在 Caddyfile（3 个）' <<<"$coverage"
+          BASH
+
       - name: Site state smoke tests
         run: |
           set -euo pipefail

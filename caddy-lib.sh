@@ -165,8 +165,80 @@ current_library_path() {
     printf '%s\n' /usr/local/bin/caddy-lib.sh
 }
 
+caddy_binary() {
+    local candidate src_dir svc_path
+
+    if [[ -n "${CADDY_BIN:-}" ]]; then
+        if [[ "$CADDY_BIN" == */* ]]; then
+            [[ -x "$CADDY_BIN" ]] || return 1
+            printf '%s\n' "$CADDY_BIN"
+            return 0
+        fi
+        if command -v "$CADDY_BIN" >/dev/null 2>&1; then
+            command -v "$CADDY_BIN"
+            return 0
+        fi
+        return 1
+    fi
+
+    if command_exists caddy; then
+        command -v caddy
+        return 0
+    fi
+
+    if candidate="$(current_script_path 2>/dev/null)"; then
+        src_dir="$(dirname "$(readlink -f "$candidate")")"
+        if [[ -x "$src_dir/caddy" ]]; then
+            printf '%s\n' "$src_dir/caddy"
+            return 0
+        fi
+    fi
+
+    if candidate="$(current_library_path 2>/dev/null)"; then
+        src_dir="$(dirname "$(readlink -f "$candidate")")"
+        if [[ -x "$src_dir/caddy" ]]; then
+            printf '%s\n' "$src_dir/caddy"
+            return 0
+        fi
+    fi
+
+    if command_exists systemctl; then
+        svc_path="$(systemctl show caddy.service -p ExecStart --value 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' | head -n 1 || true)"
+        if [[ -n "$svc_path" && -x "$svc_path" ]]; then
+            printf '%s\n' "$svc_path"
+            return 0
+        fi
+    fi
+
+    for candidate in /usr/local/bin/caddy /usr/bin/caddy /opt/ccconnect/caddy_cli/caddy; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+caddy_version_text() {
+    local bin version
+    bin="$(caddy_binary)" || {
+        printf '%s\n' "unknown"
+        return 1
+    }
+    version="$("$bin" version 2>/dev/null || true)"
+    printf '%s\n' "${version:-unknown}"
+}
+
 require_command() {
     local cmd="$1"
+    if [[ "$cmd" == "caddy" ]]; then
+        caddy_binary >/dev/null 2>&1 || {
+            fail "未安装 caddy（PATH、脚本目录和 caddy.service 均未找到可执行二进制）"
+            exit 1
+        }
+        return 0
+    fi
     command_exists "$cmd" || {
         fail "未安装 $cmd"
         exit 1
@@ -859,6 +931,8 @@ render_caddyfile_to() {
 
 validate_config_file() {
     local config_path="$1"
+    local caddy_bin
+    caddy_bin="$(caddy_binary)" || return 127
     if [[ -n "${LAST_VALIDATE_LOG:-}" ]]; then
         cleanup_paths "$LAST_VALIDATE_LOG"
     fi
@@ -867,7 +941,7 @@ validate_config_file() {
     _validate_extra_args="$(_hook_validate_args)"
     # Caddy < 2.7 doesn't support --envfile; source env inline
     local _caddy_ver
-    _caddy_ver="$(caddy version 2>/dev/null | sed -n 's/^v\?\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
+    _caddy_ver="$("$caddy_bin" version 2>/dev/null | sed -n 's/^v\?\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
     if [[ -n "$_caddy_ver" ]] && caddy_supports_envfile "$_caddy_ver"; then
         :
     else
@@ -884,7 +958,7 @@ validate_config_file() {
         fi
     fi
     # shellcheck disable=SC2086
-    caddy validate $_validate_extra_args --config "$config_path" --adapter caddyfile >"$LAST_VALIDATE_LOG" 2>&1
+    "$caddy_bin" validate $_validate_extra_args --config "$config_path" --adapter caddyfile >"$LAST_VALIDATE_LOG" 2>&1
 }
 
 backup_live_caddyfile() {
@@ -994,13 +1068,67 @@ svc_status_show() {
 svc_unit_exists() {
     detect_svc_backend
     case "$SVC_BACKEND" in
-        systemd) systemctl list-unit-files caddy.service >/dev/null 2>&1 ;;
+        systemd) systemctl list-unit-files caddy.service --no-legend 2>/dev/null | awk '{print $1}' | grep -Fxq caddy.service ;;
         openrc)  [[ -f /etc/init.d/caddy ]] ;;
         *) return 1 ;;
     esac
 }
 
 svc_backend_name() { detect_svc_backend; echo "${SVC_BACKEND:-无}"; }
+
+service_is_active_by_name() {
+    local name="$1"
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl is-active --quiet "$name" 2>/dev/null ;;
+        openrc)  rc-service -q "$name" status >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+service_is_enabled_by_name() {
+    local name="$1"
+    detect_svc_backend
+    case "$SVC_BACKEND" in
+        systemd) systemctl is-enabled --quiet "$name" 2>/dev/null ;;
+        openrc)  rc-update show default 2>/dev/null | awk '{print $1}' | grep -Fxq "$name" ;;
+        *) return 1 ;;
+    esac
+}
+
+report_service_state() {
+    local name="$1"
+    local label="$2"
+
+    if service_is_active_by_name "$name"; then
+        echo "[OK] $label 正在运行"
+    else
+        echo "[WARN] $label 未运行"
+    fi
+
+    if service_is_enabled_by_name "$name"; then
+        echo "[OK] $label 已设置开机启动"
+    else
+        echo "[INFO] $label 未设置开机启动或未安装服务单元"
+    fi
+}
+
+report_conflicting_service_state() {
+    local name="$1"
+    local label="$2"
+
+    if service_is_active_by_name "$name"; then
+        echo "[WARN] $label 正在运行，可能与 Caddy 抢占 80/443 端口"
+    else
+        echo "[OK] $label 未运行"
+    fi
+
+    if service_is_enabled_by_name "$name"; then
+        echo "[WARN] $label 已设置开机启动，重启后可能重新抢占端口"
+    else
+        echo "[OK] $label 未设置开机启动或未安装服务单元"
+    fi
+}
 
 
 acquire_flock() {
@@ -1237,6 +1365,337 @@ is_tcp_port_listening() {
     return 2
 }
 
+report_tcp_port_listener() {
+    local port="$1"
+    local lines=""
+
+    if command_exists ss; then
+        lines="$(ss -H -ltnp "sport = :$port" 2>/dev/null || true)"
+    elif command_exists netstat; then
+        lines="$(netstat -ltnp 2>/dev/null | awk -v port="$port" '$4 ~ "[:.]" port "$" {print}' || true)"
+    else
+        echo "[WARN] 无法检查 TCP :$port（缺少 ss/netstat）"
+        return 0
+    fi
+
+    if [[ -z "$lines" ]]; then
+        echo "[WARN] TCP :$port 未监听"
+        return 0
+    fi
+
+    echo "[OK] TCP :$port 正在监听"
+    printf '%s\n' "$lines" | awk 'NR <= 5 { print "  " $0 } NR == 6 { print "  ..."; exit }'
+}
+
+extract_reverse_proxy_targets() {
+    local config_path="$1"
+    [[ -f "$config_path" ]] || return 0
+
+    awk '
+        function brace_delta(s, tmp, opens, closes) {
+            tmp = s
+            opens = gsub(/\{/, "{", tmp)
+            tmp = s
+            closes = gsub(/\}/, "}", tmp)
+            return opens - closes
+        }
+        function clean_line(s) {
+            sub(/\r$/, "", s)
+            sub(/^[[:space:]]+/, "", s)
+            sub(/[[:space:]]+#.*$/, "", s)
+            return s
+        }
+        {
+            line = clean_line($0)
+            if (line == "" || line ~ /^#/) {
+                next
+            }
+
+            n = split(line, fields, /[[:space:]]+/)
+            if (fields[1] == "reverse_proxy") {
+                for (i = 2; i <= n; i++) {
+                    if (fields[i] == "{" || fields[i] ~ /^\{/) {
+                        break
+                    }
+                    if (fields[i] ~ /^@/) {
+                        continue
+                    }
+                    print fields[i]
+                }
+                if (line ~ /\{/) {
+                    in_proxy = 1
+                    depth = brace_delta(line)
+                    if (depth <= 0) {
+                        in_proxy = 0
+                    }
+                }
+                next
+            }
+
+            if (in_proxy && fields[1] == "to") {
+                for (i = 2; i <= n; i++) {
+                    if (fields[i] == "{" || fields[i] ~ /^\{/) {
+                        break
+                    }
+                    print fields[i]
+                }
+            }
+
+            if (in_proxy) {
+                depth += brace_delta(line)
+                if (depth <= 0) {
+                    in_proxy = 0
+                }
+            }
+        }
+    ' "$config_path"
+}
+
+normalize_site_name() {
+    local value="$1"
+    local host port wildcard_base
+
+    value="$(trim "$value")"
+    value="${value%,}"
+    value="${value#http://}"
+    value="${value#https://}"
+    value="${value%%/*}"
+    value="${value%.}"
+    value="${value,,}"
+
+    [[ -n "$value" ]] || return 1
+    [[ "$value" != "_" ]] || return 1
+    [[ "$value" != "localhost" ]] || return 1
+    [[ "$value" != \[*\] ]] || return 1
+    [[ "$value" != \[*\]:* ]] || return 1
+
+    if [[ "$value" == *:* ]]; then
+        host="${value%:*}"
+        port="${value##*:}"
+        if validate_port "$port"; then
+            value="$host"
+        else
+            return 1
+        fi
+    fi
+
+    if [[ "$value" == \*.* ]]; then
+        wildcard_base="${value#*.}"
+        validate_domain "$wildcard_base" || return 1
+        printf '%s\n' "$value"
+        return 0
+    fi
+
+    validate_domain "$value" || return 1
+    printf '%s\n' "$value"
+}
+
+extract_caddy_site_labels() {
+    local config_path="$1"
+    [[ -f "$config_path" ]] || return 0
+
+    awk '
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            if (line ~ /^[[:space:]]/) {
+                next
+            }
+            sub(/[[:space:]]+#.*$/, "", line)
+            if (line !~ /\{/) {
+                next
+            }
+            sub(/\{.*/, "", line)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+            if (line == "") {
+                next
+            }
+            n = split(line, labels, ",")
+            for (i = 1; i <= n; i++) {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", labels[i])
+                if (labels[i] != "") {
+                    print labels[i]
+                }
+            }
+        }
+    ' "$config_path"
+}
+
+extract_nginx_server_names() {
+    local nginx_dir="$1"
+    local -a files=()
+
+    [[ -d "$nginx_dir" ]] || return 0
+    shopt -s nullglob
+    files=("$nginx_dir"/*.conf)
+    shopt -u nullglob
+    (( ${#files[@]} > 0 )) || return 0
+
+    awk '
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            sub(/[[:space:]]*#.*/, "", line)
+            if (line !~ /^[[:space:]]*server_name[[:space:]]+/) {
+                next
+            }
+            sub(/^[[:space:]]*server_name[[:space:]]+/, "", line)
+            sub(/;.*/, "", line)
+            gsub(/[[:space:]]+/, "\n", line)
+            print line
+        }
+    ' "${files[@]}"
+}
+
+print_limited_items() {
+    local max="$1"
+    shift
+    local total="$#"
+    local index=0
+    local item
+
+    for item in "$@"; do
+        index=$((index + 1))
+        if (( index <= max )); then
+            echo "  - $item"
+        fi
+    done
+    if (( total > max )); then
+        echo "  ... 还有 $((total - max)) 项"
+    fi
+}
+
+report_nginx_migration_coverage() {
+    local nginx_dir="$1"
+    local config_path="$2"
+    local raw normalized
+    local -A nginx_domains=()
+    local -A caddy_domains=()
+    local -a missing_domains=()
+    local -a extra_domains=()
+    local -a missing_sorted=()
+    local -a extra_sorted=()
+
+    if [[ ! -d "$nginx_dir" ]]; then
+        echo "[INFO] 未发现 $nginx_dir，跳过 nginx 迁移覆盖检查"
+        return 0
+    fi
+    if [[ ! -f "$config_path" ]]; then
+        echo "[WARN] 未找到 $config_path，无法检查 nginx 迁移覆盖"
+        return 0
+    fi
+
+    while IFS= read -r raw; do
+        normalized="$(normalize_site_name "$raw" 2>/dev/null || true)"
+        [[ -n "$normalized" ]] || continue
+        nginx_domains["$normalized"]=1
+    done < <(extract_nginx_server_names "$nginx_dir")
+
+    while IFS= read -r raw; do
+        normalized="$(normalize_site_name "$raw" 2>/dev/null || true)"
+        [[ -n "$normalized" ]] || continue
+        caddy_domains["$normalized"]=1
+    done < <(extract_caddy_site_labels "$config_path")
+
+    if (( ${#nginx_domains[@]} == 0 )); then
+        echo "[INFO] nginx 配置中未发现可比较的 server_name"
+        return 0
+    fi
+
+    for normalized in "${!nginx_domains[@]}"; do
+        if [[ -z "${caddy_domains[$normalized]:-}" ]]; then
+            missing_domains+=("$normalized")
+        fi
+    done
+    for normalized in "${!caddy_domains[@]}"; do
+        if [[ -z "${nginx_domains[$normalized]:-}" ]]; then
+            extra_domains+=("$normalized")
+        fi
+    done
+
+    if (( ${#missing_domains[@]} == 0 )); then
+        echo "[OK] nginx server_name 已全部出现在 Caddyfile（${#nginx_domains[@]} 个）"
+    else
+        mapfile -t missing_sorted < <(printf '%s\n' "${missing_domains[@]}" | sort)
+        echo "[WARN] nginx 中有 ${#missing_domains[@]}/${#nginx_domains[@]} 个域名未出现在 Caddyfile:"
+        print_limited_items 20 "${missing_sorted[@]}"
+    fi
+
+    if (( ${#extra_domains[@]} > 0 )); then
+        mapfile -t extra_sorted < <(printf '%s\n' "${extra_domains[@]}" | sort)
+        echo "[INFO] Caddyfile 中另有 ${#extra_domains[@]} 个 nginx 未声明的域名:"
+        print_limited_items 20 "${extra_sorted[@]}"
+    fi
+}
+
+extract_tls_file_pairs() {
+    local config_path="$1"
+    [[ -f "$config_path" ]] || return 0
+
+    awk '
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+#.*$/, "", line)
+            if (line !~ /^tls([[:space:]]|$)/) {
+                next
+            }
+            n = split(line, fields, /[[:space:]]+/)
+            if (n >= 3 && fields[2] != "{" && fields[2] != "internal") {
+                print fields[2] "\t" fields[3]
+            }
+        }
+    ' "$config_path"
+}
+
+report_tls_file_references() {
+    local config_path="$1"
+    local cert key end_date
+    local found=0
+
+    if [[ ! -f "$config_path" ]]; then
+        echo "[WARN] 未找到 $config_path，跳过 TLS 文件引用检查"
+        return 0
+    fi
+
+    while IFS=$'\t' read -r cert key; do
+        found=1
+        cert="$(strip_wrapping_quotes "$cert")"
+        key="$(strip_wrapping_quotes "$key")"
+
+        if [[ -r "$cert" ]]; then
+            echo "[OK] TLS 证书可读: $cert"
+            if command_exists openssl; then
+                if openssl x509 -checkend 0 -noout -in "$cert" >/dev/null 2>&1; then
+                    end_date="$(openssl x509 -noout -enddate -in "$cert" 2>/dev/null | sed 's/^notAfter=//' || true)"
+                    if openssl x509 -checkend 2592000 -noout -in "$cert" >/dev/null 2>&1; then
+                        echo "[OK] TLS 证书未过期: ${end_date:-unknown}"
+                    else
+                        echo "[WARN] TLS 证书将在 30 天内过期: ${end_date:-unknown}"
+                    fi
+                else
+                    echo "[WARN] TLS 证书已过期或无法解析: $cert"
+                fi
+            else
+                echo "[INFO] 缺少 openssl，跳过证书有效期检查"
+            fi
+        else
+            echo "[WARN] TLS 证书不可读: $cert"
+        fi
+
+        if [[ -r "$key" ]]; then
+            echo "[OK] TLS 私钥可读: $key"
+        else
+            echo "[WARN] TLS 私钥不可读: $key"
+        fi
+    done < <(extract_tls_file_pairs "$config_path")
+
+    if (( found == 0 )); then
+        echo "[INFO] 未发现手动 tls cert/key 文件引用"
+    fi
+}
+
 check_local_upstreams_health() {
     local config_path="$1"
     local mode target hostport host port rc
@@ -1251,7 +1710,7 @@ check_local_upstreams_health() {
         target="$(trim "$target")"
         [[ -n "$target" ]] || continue
         targets+=("$target")
-    done < <(sed -n 's/^[[:space:]]*reverse_proxy[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' "$config_path")
+    done < <(extract_reverse_proxy_targets "$config_path")
 
     for target in "${targets[@]}"; do
         hostport="$target"
@@ -3141,10 +3600,12 @@ cmd_cert_check() {
 }
 
 cmd_doctor() {
+    local caddy_bin=""
+
     echo "===== 环境检查 ====="
 
-    if command_exists caddy; then
-        echo "[OK] 已安装 caddy: $(caddy version 2>/dev/null || echo unknown)"
+    if caddy_bin="$(caddy_binary 2>/dev/null)"; then
+        echo "[OK] 已安装 caddy: $caddy_bin ($(caddy_version_text))"
     else
         echo "[NO] 未安装 caddy"
     fi
@@ -3163,11 +3624,8 @@ cmd_doctor() {
             echo "[WARN] 未检测到 caddy 服务单元"
         fi
 
-        if svc_is_active; then
-            echo "[OK] Caddy 正在运行"
-        else
-            echo "[WARN] Caddy 未运行"
-        fi
+        report_service_state caddy "Caddy"
+        report_conflicting_service_state nginx "nginx"
     else
         echo "[WARN] 未检测到 service manager（systemd/OpenRC）"
     fi
@@ -3184,6 +3642,53 @@ cmd_doctor() {
             echo "[WARN] $path 不存在"
         fi
     done
+
+    echo
+    echo "===== Caddyfile 校验 ====="
+    if [[ -f "$CADDYFILE" ]]; then
+        echo "[OK] 找到 $CADDYFILE"
+        if [[ -n "$caddy_bin" ]]; then
+            if validate_config_file "$CADDYFILE"; then
+                echo "[OK] Caddyfile 校验通过"
+                cleanup_paths "${LAST_VALIDATE_LOG:-}"
+                LAST_VALIDATE_LOG=""
+            else
+                echo "[WARN] Caddyfile 校验失败"
+                if [[ -n "${LAST_VALIDATE_LOG:-}" && -f "$LAST_VALIDATE_LOG" ]]; then
+                    sed -n '1,80p' "$LAST_VALIDATE_LOG"
+                    cleanup_paths "$LAST_VALIDATE_LOG"
+                    LAST_VALIDATE_LOG=""
+                fi
+            fi
+        else
+            echo "[WARN] 未安装 caddy，跳过 Caddyfile 校验"
+        fi
+    else
+        echo "[WARN] 未找到 $CADDYFILE"
+    fi
+
+    echo
+    echo "===== 端口监听 ====="
+    report_tcp_port_listener 80
+    report_tcp_port_listener 443
+
+    echo
+    echo "===== 本地上游 ====="
+    if [[ -f "$CADDYFILE" ]]; then
+        if ! check_local_upstreams_health "$CADDYFILE"; then
+            echo "[WARN] 本地上游检查未通过"
+        fi
+    else
+        echo "[WARN] 未找到 $CADDYFILE，跳过本地上游检查"
+    fi
+
+    echo
+    echo "===== TLS 文件引用 ====="
+    report_tls_file_references "$CADDYFILE"
+
+    echo
+    echo "===== nginx 迁移覆盖 ====="
+    report_nginx_migration_coverage /etc/nginx/conf.d "$CADDYFILE"
 }
 
 cmd_install_self() {
@@ -3325,8 +3830,10 @@ install_caddy_via_apk() {
 
 
 cmd_install() {
-    if command_exists caddy; then
-        say "检测到 caddy 已安装: $(caddy version 2>/dev/null || echo unknown)"
+    local caddy_bin=""
+
+    if caddy_bin="$(caddy_binary 2>/dev/null)"; then
+        say "检测到 caddy 已安装: $caddy_bin ($(caddy_version_text))"
     elif command_exists apt-get; then
         say "检测到 apt-get，按 Caddy 官方文档安装稳定版。"
         install_caddy_via_apt
@@ -3483,14 +3990,16 @@ cmd_import() {
         return 1
     fi
 
-    local sites_bak globals_bak state_bak old_email tmp_src meta
+    local sites_bak globals_bak state_bak old_email tmp_src meta fmt_bin
     tmp_src="$(mktemp)"
     if ! cp -a "$src" "$tmp_src"; then
         cleanup_paths "$tmp_src"
         fail "无法复制导入源: $src"
         return 1
     fi
-    caddy fmt --overwrite "$tmp_src" >/dev/null 2>&1 || true
+    if fmt_bin="$(caddy_binary 2>/dev/null)"; then
+        "$fmt_bin" fmt --overwrite "$tmp_src" >/dev/null 2>&1 || true
+    fi
 
     sites_bak="$(mktemp -d "$BACKUP_DIR/sites.XXXXXX")"
     globals_bak="$(mktemp -d "$BACKUP_DIR/globals.XXXXXX")"

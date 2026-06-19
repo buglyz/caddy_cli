@@ -136,7 +136,8 @@ _hook_cmd_doctor() {
     if cloudflare_env_configured; then
         echo "[OK] Cloudflare API Token 已配置"
     fi
-    if command_exists caddy && caddy list-modules 2>/dev/null | grep -q '^dns.providers.cloudflare$'; then
+    local caddy_bin=""
+    if caddy_bin="$(caddy_binary 2>/dev/null)" && "$caddy_bin" list-modules 2>/dev/null | grep -q '^dns.providers.cloudflare$'; then
         echo "[OK] 已内置 Cloudflare DNS 模块"
     else
         echo "[WARN] 未检测到 Cloudflare DNS 模块（需用 install-cloudflare.sh 安装）"
