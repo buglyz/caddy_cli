@@ -47,6 +47,17 @@ jobs:
           tmp="$(mktemp)"
           bash -c 'source ./caddy-lib.sh; build_gateway_site_block gate.example.com https "$(gateway_allow_regex "emby.example.com:443,10.0.0.5:8096")" "emby.example.com:443,10.0.0.5:8096"' > "$tmp"
           ./caddy validate --config "$tmp" --adapter caddyfile
+          grep -Fq 'header_up X-Real-IP {remote_host}' "$tmp"
+          grep -Fq 'header_up Host emby.example.com' "$tmp"
+          grep -Fq 'header_down Location ^https://([^/]+)(/.*)$ https://gate.example.com/https/$1$2' "$tmp"
+          grep -Fq 'path_regexp up_https_default_port_0 ^/https/emby\.example\.com(/.*)' "$tmp"
+          grep -Fq 'path_regexp up_default_default_port_0 ^/emby\.example\.com(/.*)' "$tmp"
+
+          bash -c 'source ./caddy-lib.sh; build_gateway_site_block gate.example.com https "" ""' > "$tmp"
+          ./caddy validate --config "$tmp" --adapter caddyfile
+          grep -Fq 'to {re.up_http_host.1}:80' "$tmp"
+          grep -Fq 'to {re.up_https_host.1}:443' "$tmp"
+          grep -Fq 'to {re.up_default_host.1}:443' "$tmp"
 
           bash -c 'source ./caddy-lib.sh; build_static_site_block static.example.com "/var/www/site with spaces" on' > "$tmp"
           ./caddy validate --config "$tmp" --adapter caddyfile
