@@ -329,12 +329,10 @@ OK
 通用反代网关 — Emby Proxy Toolbox (Caddy)
 
 使用方式：
-  ${scheme}://${DOMAIN}/<上游主机:端口>/路径
-  ${scheme}://${DOMAIN}/http/<上游主机:端口>/路径
-  ${scheme}://${DOMAIN}/https/<上游主机:端口>/路径
+  ${scheme}://${DOMAIN}/<上游主机:端口>/路径          （默认 HTTPS 回源）
+  ${scheme}://${DOMAIN}/http/<上游主机:端口>/路径    （强制 HTTP 回源）
 
 上游限制: ${ACCESS_NOTE}
-默认按 HTTPS 回源；若需 HTTP 回源请使用 /http 前缀。
 INFO 200
     }
 
