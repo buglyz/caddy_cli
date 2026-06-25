@@ -31,7 +31,6 @@ jobs:
             install.sh
             install-cloudflare.sh
             caddy-cloudflare
-            emby-gateway
           )
           for script in "${scripts[@]}"; do
             bash -n "$script"
@@ -261,5 +260,4 @@ jobs:
             caddy-cloudflare.sh \
             install.sh \
             install-cloudflare.sh \
-            caddy-cloudflare \
-            emby-gateway
+            caddy-cloudflare
