@@ -2,17 +2,13 @@
 # emby-gateway — 通用反代网关（Caddy 版本）
 # 从 emby-proxy-toolbox nginx 配置转换而来
 # 用法: emby-gateway --domain <域名> [--no-ssl]
+# 
+# 修复版本 - 解决了 "dial tcp [IP]:0" 端口错误问题
+# 修复说明：
+#   1. 将 rewrite * 改为 uri path_regexp
+#   2. 将 reverse_proxy { to $upstream } 改为 reverse_proxy $upstream
+#   3. 这样可以确保 Caddy 正确解析上游地址和端口
 set -euo pipefail
-
-DOMAIN=""
-NO_SSL=0
-ALLOW_SPEC=""
-ALLOW_REGEX=""
-UNSAFE_OPEN_PROXY=0
-CADDY_SITES_DIR="${CADDY_SITES_DIR:-/etc/caddy/sites.d}"
-CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
-CONF_FILE=""
-CONF_BACKUP=""
 
 usage() {
     cat <<'EOF'
@@ -183,7 +179,7 @@ BLOCK
 gateway_emit_proxy_handle() {
     local scheme="$1"
     local matcher="$2"
-    local rest_placeholder="$3"
+    local uri_pattern="$3"
     local upstream="$4"
     local upstream_scheme="$5"
     local host_header="$6"
@@ -191,9 +187,8 @@ gateway_emit_proxy_handle() {
 
     cat <<BLOCK
     handle @$matcher {
-        rewrite * $rest_placeholder
-        reverse_proxy {
-            to $upstream
+        uri path_regexp $uri_pattern
+        reverse_proxy $upstream {
 BLOCK
     if [[ "$upstream_scheme" == "http" ]]; then
         cat <<'BLOCK'
@@ -225,7 +220,7 @@ gateway_emit_proxy_route() {
     local matcher="$2"
     local regexp_name="$3"
     local pattern="$4"
-    local rest_placeholder="$5"
+    local uri_pattern="$5"
     local upstream="$6"
     local upstream_scheme="$7"
     local host_header="$8"
@@ -234,7 +229,7 @@ gateway_emit_proxy_route() {
     cat <<BLOCK
     @$matcher path_regexp $regexp_name $pattern
 BLOCK
-    gateway_emit_proxy_handle "$scheme" "$matcher" "$rest_placeholder" "$upstream" "$upstream_scheme" "$host_header" "$location_prefix"
+    gateway_emit_proxy_handle "$scheme" "$matcher" "$uri_pattern" "$upstream" "$upstream_scheme" "$host_header" "$location_prefix"
 }
 
 gateway_emit_unsafe_routes() {
@@ -242,33 +237,33 @@ gateway_emit_unsafe_routes() {
 
     cat <<BLOCK
     @noSlashHttp path_regexp redir_http ^/http/([A-Za-z0-9.\\-_:]+)\$
-    redir @noSlashHttp /http/{re.redir_http.1}/ 308
+    redir @noSlashHttp /http/{http.regexp.redir_http.1}/ 308
 
     @noSlashHttps path_regexp redir_https ^/https/([A-Za-z0-9.\\-_:]+)\$
-    redir @noSlashHttps /https/{re.redir_https.1}/ 308
+    redir @noSlashHttps /https/{http.regexp.redir_https.1}/ 308
 
 BLOCK
-    gateway_emit_proxy_route "$scheme" "httpProxyWithPort" "up_http_port" "^/http/([A-Za-z0-9.\\-_]+):([0-9]+)(/.*)" "{re.up_http_port.3}" "{re.up_http_port.1}:{re.up_http_port.2}" "http" "{re.up_http_port.1}" "${scheme}://${DOMAIN}/http/{re.up_http_port.1}:{re.up_http_port.2}"
-    gateway_emit_proxy_route "$scheme" "httpProxyNoPort" "up_http_host" "^/http/([A-Za-z0-9.\\-_]+)(/.*)" "{re.up_http_host.2}" "{re.up_http_host.1}:80" "http" "{re.up_http_host.1}" "${scheme}://${DOMAIN}/http/{re.up_http_host.1}"
-    gateway_emit_proxy_route "$scheme" "httpsProxyWithPort" "up_https_port" "^/https/([A-Za-z0-9.\\-_]+):([0-9]+)(/.*)" "{re.up_https_port.3}" "{re.up_https_port.1}:{re.up_https_port.2}" "https" "{re.up_https_port.1}" "${scheme}://${DOMAIN}/https/{re.up_https_port.1}:{re.up_https_port.2}"
-    gateway_emit_proxy_route "$scheme" "httpsProxyNoPort" "up_https_host" "^/https/([A-Za-z0-9.\\-_]+)(/.*)" "{re.up_https_host.2}" "{re.up_https_host.1}:443" "https" "{re.up_https_host.1}" "${scheme}://${DOMAIN}/https/{re.up_https_host.1}"
+    gateway_emit_proxy_route "$scheme" "httpProxyWithPort" "up_http_port" "^/http/([A-Za-z0-9.\\-_]+):([0-9]+)(/.*)" "^/http/[^/]+(.*) \$1" "{http.regexp.up_http_port.1}:{http.regexp.up_http_port.2}" "http" "{http.regexp.up_http_port.1}" "${scheme}://${DOMAIN}/http/{http.regexp.up_http_port.1}:{http.regexp.up_http_port.2}"
+    gateway_emit_proxy_route "$scheme" "httpProxyNoPort" "up_http_host" "^/http/([A-Za-z0-9.\\-_]+)(/.*)" "^/http/[^/]+(.*) \$1" "{http.regexp.up_http_host.1}:80" "http" "{http.regexp.up_http_host.1}" "${scheme}://${DOMAIN}/http/{http.regexp.up_http_host.1}"
+    gateway_emit_proxy_route "$scheme" "httpsProxyWithPort" "up_https_port" "^/https/([A-Za-z0-9.\\-_]+):([0-9]+)(/.*)" "^/https/[^/]+(.*) \$1" "{http.regexp.up_https_port.1}:{http.regexp.up_https_port.2}" "https" "{http.regexp.up_https_port.1}" "${scheme}://${DOMAIN}/https/{http.regexp.up_https_port.1}:{http.regexp.up_https_port.2}"
+    gateway_emit_proxy_route "$scheme" "httpsProxyNoPort" "up_https_host" "^/https/([A-Za-z0-9.\\-_]+)(/.*)" "^/https/[^/]+(.*) \$1" "{http.regexp.up_https_host.1}:443" "https" "{http.regexp.up_https_host.1}" "${scheme}://${DOMAIN}/https/{http.regexp.up_https_host.1}"
     cat <<'BLOCK'
     @defaultProxyWithPort {
         path_regexp up_default_port ^/([A-Za-z0-9.\-_]+):([0-9]+)(/.*)
         not path /http/* /https/*
     }
 BLOCK
-    gateway_emit_proxy_handle "$scheme" "defaultProxyWithPort" "{re.up_default_port.3}" "{re.up_default_port.1}:{re.up_default_port.2}" "https" "{re.up_default_port.1}" "${scheme}://${DOMAIN}/{re.up_default_port.1}:{re.up_default_port.2}"
+    gateway_emit_proxy_handle "$scheme" "defaultProxyWithPort" "^/[^/]+(.*) \$1" "{http.regexp.up_default_port.1}:{http.regexp.up_default_port.2}" "https" "{http.regexp.up_default_port.1}" "${scheme}://${DOMAIN}/{http.regexp.up_default_port.1}:{http.regexp.up_default_port.2}"
     cat <<'BLOCK'
     @defaultProxyNoPort {
         path_regexp up_default_host ^/([A-Za-z0-9.\-_]+)(/.*)
         not path /http/* /https/*
     }
 BLOCK
-    gateway_emit_proxy_handle "$scheme" "defaultProxyNoPort" "{re.up_default_host.2}" "{re.up_default_host.1}:443" "https" "{re.up_default_host.1}" "${scheme}://${DOMAIN}/{re.up_default_host.1}"
+    gateway_emit_proxy_handle "$scheme" "defaultProxyNoPort" "^/[^/]+(.*) \$1" "{http.regexp.up_default_host.1}:443" "https" "{http.regexp.up_default_host.1}" "${scheme}://${DOMAIN}/{http.regexp.up_default_host.1}"
     cat <<BLOCK
     @noSlash path_regexp redir_bare ^/([A-Za-z0-9.\\-_:]+)\$
-    redir @noSlash /{re.redir_bare.1}/ 308
+    redir @noSlash /{http.regexp.redir_bare.1}/ 308
 BLOCK
 }
 
@@ -288,20 +283,20 @@ gateway_emit_allowed_routes() {
         gateway_emit_redirect "noSlashHttps${idx}" "redir_https_${idx}" "^/https/${target_re}\$" "/https/${target}/"
         gateway_emit_redirect "noSlashDefault${idx}" "redir_default_${idx}" "^/${target_re}\$" "/${target}/"
 
-        gateway_emit_proxy_route "$scheme" "httpProxy${idx}" "up_http_${idx}" "^/http/${target_re}(/.*)" "{re.up_http_${idx}.1}" "$target" "http" "$host" "${scheme}://${DOMAIN}/http/${target}"
-        gateway_emit_proxy_route "$scheme" "httpsProxy${idx}" "up_https_${idx}" "^/https/${target_re}(/.*)" "{re.up_https_${idx}.1}" "$target" "https" "$host" "${scheme}://${DOMAIN}/https/${target}"
-        gateway_emit_proxy_route "$scheme" "defaultProxy${idx}" "up_default_${idx}" "^/${target_re}(/.*)" "{re.up_default_${idx}.1}" "$target" "https" "$host" "${scheme}://${DOMAIN}/${target}"
+        gateway_emit_proxy_route "$scheme" "httpProxy${idx}" "up_http_${idx}" "^/http/${target_re}(/.*)" "^/http/[^/]+(.*) \$1" "$target" "http" "$host" "${scheme}://${DOMAIN}/http/${target}"
+        gateway_emit_proxy_route "$scheme" "httpsProxy${idx}" "up_https_${idx}" "^/https/${target_re}(/.*)" "^/https/[^/]+(.*) \$1" "$target" "https" "$host" "${scheme}://${DOMAIN}/https/${target}"
+        gateway_emit_proxy_route "$scheme" "defaultProxy${idx}" "up_default_${idx}" "^/${target_re}(/.*)" "^/[^/]+(.*) \$1" "$target" "https" "$host" "${scheme}://${DOMAIN}/${target}"
 
         if [[ "$port" == "80" ]]; then
             gateway_emit_redirect "noSlashHttpDefaultPort${idx}" "redir_http_default_port_${idx}" "^/http/${host_re}\$" "/http/${host}/"
-            gateway_emit_proxy_route "$scheme" "httpProxyDefaultPort${idx}" "up_http_default_port_${idx}" "^/http/${host_re}(/.*)" "{re.up_http_default_port_${idx}.1}" "${host}:80" "http" "$host" "${scheme}://${DOMAIN}/http/${host}"
+            gateway_emit_proxy_route "$scheme" "httpProxyDefaultPort${idx}" "up_http_default_port_${idx}" "^/http/${host_re}(/.*)" "^/http/[^/]+(.*) \$1" "${host}:80" "http" "$host" "${scheme}://${DOMAIN}/http/${host}"
         fi
 
         if [[ "$port" == "443" ]]; then
             gateway_emit_redirect "noSlashHttpsDefaultPort${idx}" "redir_https_default_port_${idx}" "^/https/${host_re}\$" "/https/${host}/"
             gateway_emit_redirect "noSlashDefaultPort${idx}" "redir_default_port_${idx}" "^/${host_re}\$" "/${host}/"
-            gateway_emit_proxy_route "$scheme" "httpsProxyDefaultPort${idx}" "up_https_default_port_${idx}" "^/https/${host_re}(/.*)" "{re.up_https_default_port_${idx}.1}" "${host}:443" "https" "$host" "${scheme}://${DOMAIN}/https/${host}"
-            gateway_emit_proxy_route "$scheme" "defaultProxyDefaultPort${idx}" "up_default_default_port_${idx}" "^/${host_re}(/.*)" "{re.up_default_default_port_${idx}.1}" "${host}:443" "https" "$host" "${scheme}://${DOMAIN}/${host}"
+            gateway_emit_proxy_route "$scheme" "httpsProxyDefaultPort${idx}" "up_https_default_port_${idx}" "^/https/${host_re}(/.*)" "^/https/[^/]+(.*) \$1" "${host}:443" "https" "$host" "${scheme}://${DOMAIN}/https/${host}"
+            gateway_emit_proxy_route "$scheme" "defaultProxyDefaultPort${idx}" "up_default_default_port_${idx}" "^/${host_re}(/.*)" "^/[^/]+(.*) \$1" "${host}:443" "https" "$host" "${scheme}://${DOMAIN}/${host}"
         fi
 
         idx=$((idx + 1))
@@ -311,6 +306,8 @@ gateway_emit_allowed_routes() {
     handle {
         respond "upstream is not allowed" 403
     }
+BLOCK
+}
 BLOCK
 }
 
