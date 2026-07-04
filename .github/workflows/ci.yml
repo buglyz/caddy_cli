@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Check Bash syntax
+        run: |
+          bash -n *.sh caddy-cloudflare tests/smoke.sh
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck -x caddy-lib.sh caddy.sh caddy-cloudflare caddy-cloudflare.sh install.sh install-cloudflare.sh tests/smoke.sh
+
+      - name: Run smoke tests
+        run: |
+          tests/smoke.sh
+
+      - name: Verify checksums
+        run: |
+          sha256sum -c checksums.txt

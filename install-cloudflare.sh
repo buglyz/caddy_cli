@@ -167,12 +167,14 @@ build_caddy_with_cloudflare() {
     local tmpdir built
     tmpdir="$(mktemp -d)"
     built="$tmpdir/caddy"
+    trap 'rm -rf "$tmpdir"' RETURN
 
     "$XCADDY_BIN" build "$CADDY_VERSION" --with "$CLOUDFLARE_MODULE" --output "$built"
     [[ -s "$built" ]] || die "Built Caddy binary is empty"
 
     install_caddy_binary "$built"
     rm -rf "$tmpdir"
+    trap - RETURN
 }
 
 prebuilt_caddy_supported() {
@@ -360,12 +362,15 @@ install_cli_cf() {
 
     local tmp_lib
     tmp_lib="$(mktemp)"
+    local tmp_cli
+    tmp_cli=""
+    trap 'rm -f "$tmp_lib" "$tmp_cli"' RETURN
+
     safe_download "$LIB_URL" "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
     verify_checksum "$tmp_lib" "caddy-lib.sh"
     bash -n "$tmp_lib"
 
-    local tmp_cli
     tmp_cli="$(mktemp)"
     safe_download "$CADDY_CF_URL" "$tmp_cli"
     [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CADDY_CF_URL"
@@ -376,6 +381,7 @@ install_cli_cf() {
     install -m 0755 "$tmp_cli" "$CLI_BIN"
     ln -sf "$CLI_BIN" "$CLI_ALIAS"
     rm -f "$tmp_lib" "$tmp_cli"
+    trap - RETURN
 }
 
 # ── Main ─────────────────────────────────────────────────

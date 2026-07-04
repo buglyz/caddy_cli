@@ -2299,7 +2299,9 @@ cmd_add_emby() {
 
     site_block="$(build_emby_site_block "$label" "$target_domain" "$scheme")"
     ensure_dirs
-    write_site_file "$new_file" "$label" "$site_block"
+    if ! write_site_file "$new_file" "$label" "$site_block"; then
+        return 1
+    fi
     fix_permissions
     if [[ "$scheme" == "http" ]]; then
         say "已添加 Emby 反代站点（HTTP，不申请证书）: $label -> $target_domain"
@@ -2387,7 +2389,9 @@ cmd_add_gateway() {
 
     site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     ensure_dirs
-    write_site_file "$new_file" "$label" "$site_block"
+    if ! write_site_file "$new_file" "$label" "$site_block"; then
+        return 1
+    fi
     fix_permissions
     if [[ "$scheme" == "http" ]]; then
         say "已添加通用反代网关（HTTP，不申请证书）: $label"
@@ -2558,7 +2562,7 @@ cmd_add_static() {
     fi
 }
 
-cmd_set_emby() {
+cmd_set_emby_file() {
     local file="$1"
     local site_type="$2"
     local label="$3"
@@ -2636,7 +2640,9 @@ cmd_set_emby() {
 
     local oldbak=""
     oldbak="$(backup_file_if_exists "$file")"
-    write_site_file "$file" "$label" "$site_block" "$oldbak"
+    if ! write_site_file "$file" "$label" "$site_block" "$oldbak"; then
+        return 1
+    fi
     fix_permissions
 }
 
@@ -2697,7 +2703,7 @@ cmd_set() {
     fi
 
     if [[ "$site_type" == "Emby反代" ]]; then
-        cmd_set_emby "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
+        cmd_set_emby_file "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
         return $?
     fi
     if [[ "$site_type" == "网关" ]]; then
