@@ -39,7 +39,9 @@ sudo c help     # 命令行模式
 c list
 c add example.com 3000
 c add example.com 3000 --path /api
+c add lan.example.com 3000 --http --skip-dns-check
 c add-static static.example.com /var/www/site --spa
+c add-static lan-static.example.com /var/www/site --http --skip-dns-check
 c add lan.example.com 3000 --skip-dns-check
 c set example.com --port 4000
 c enable example.com
@@ -99,6 +101,7 @@ c update
 - 写操作自动快照，可 `c snapshots` 查看、`c undo [快照ID]` 回滚
 - 上游本地端口健康检查（`warn/strict`）
 - 添加域名反代前会检查 DNS A/AAAA 是否解析到本机 IP，可用 `--skip-dns-check` 跳过
+- 交互式添加配置时会询问是否启用 TLS/HTTPS；命令行可用 `--http` 或 `--https` 显式指定
 - 全局并发锁，避免多终端同时修改互相覆盖
 - 配置应用前自动校验，失败自动回滚
 - 配置重载失败时自动降级 `restart`（兼容老 systemd）

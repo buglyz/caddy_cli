@@ -37,7 +37,7 @@ assert_file_equals() {
 }
 
 apply_config() {
-    return 1
+    return "${APPLY_CONFIG_STATUS:-1}"
 }
 
 test_add_emby_propagates_apply_failure() {
@@ -90,9 +90,23 @@ test_cmd_set_routes_emby_sites_to_file_updater() {
     assert_file_equals "$file" "$original"
 }
 
+test_add_static_supports_http_mode() {
+    local file
+    local expected_prefix="http://static.example.com {"
+
+    APPLY_CONFIG_STATUS=0 cmd_add_static static.example.com /srv/www --http --skip-dns-check >/dev/null 2>&1
+
+    file="$(site_path_for_label static.example.com)"
+    IFS= read -r first_line < "$file"
+    [[ "$first_line" == "$expected_prefix" ]] || fail_test "static site did not use HTTP site label"
+    ! grep -q 'tls {' "$file" || fail_test "static HTTP site unexpectedly emitted TLS block"
+    APPLY_CONFIG_STATUS=1
+}
+
 test_add_emby_propagates_apply_failure
 test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
 test_cmd_set_routes_emby_sites_to_file_updater
+test_add_static_supports_http_mode
 
 printf 'ok - smoke tests passed\n'

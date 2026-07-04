@@ -313,6 +313,23 @@ prompt_yes_no() {
     [[ "$answer" =~ ^[Yy]$ ]]
 }
 
+prompt_yes_no_default_yes() {
+    local prompt="$1"
+    local answer=""
+    [[ -t 0 ]] || return 0
+
+    read -rp "$prompt [Y/n]: " answer
+    [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]
+}
+
+prompt_tls_scheme() {
+    if prompt_yes_no_default_yes "是否启用 TLS/HTTPS（自动申请证书）？"; then
+        printf '%s' "https"
+    else
+        printf '%s' "http"
+    fi
+}
+
 clear_managed_dir() {
     local dir="$1"
     find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
@@ -1952,11 +1969,18 @@ build_static_site_block() {
     local label="$1"
     local site_dir="$2"
     local spa_mode="$3"
+    local scheme="${4:-https}"
+    local site_label="$label"
+    [[ "$scheme" == "http" ]] && site_label="http://${label}"
 
     cat <<EOF
-$label {
+${site_label} {
 EOF
-    emit_site_common_blocks
+    if [[ "$scheme" == "http" ]]; then
+        emit_site_common_blocks no
+    else
+        emit_site_common_blocks
+    fi
     cat <<EOF
     root * $(caddyfile_quote "$site_dir")
 EOF
@@ -2235,12 +2259,15 @@ cmd_add_emby() {
     local label=""
     local target_domain=""
     local scheme="https"
+    local scheme_explicit=0
+    local prompted=0
     local skip_dns_check=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --http) scheme="http" ;;
+            --http|--no-ssl) scheme="http"; scheme_explicit=1 ;;
+            --https) scheme="https"; scheme_explicit=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-emby 参数: $1"; return 1 ;;
@@ -2253,6 +2280,7 @@ cmd_add_emby() {
 
     if [[ -z "$label" ]]; then
         read -rp "请输入你的域名: " label
+        prompted=1
     fi
     label="$(trim "$label")"
     if ! validate_domain "$label"; then
@@ -2262,6 +2290,7 @@ cmd_add_emby() {
 
     if [[ -z "$target_domain" ]]; then
         read -rp "请输入目标 Emby 服务器地址（如 https://emby.example.com:443）: " target_domain
+        prompted=1
     fi
     target_domain="$(trim "$target_domain")"
     if [[ -z "$target_domain" ]]; then
@@ -2276,6 +2305,10 @@ cmd_add_emby() {
     if ! validate_proxy_target "$target_domain"; then
         fail "目标地址不合法"
         return 1
+    fi
+
+    if (( scheme_explicit == 0 && prompted == 1 )); then
+        scheme="$(prompt_tls_scheme)"
     fi
 
     local sanitized old_file new_file file site_block
@@ -2314,6 +2347,8 @@ cmd_add_emby() {
 cmd_add_gateway() {
     local label=""
     local scheme="https"
+    local scheme_explicit=0
+    local prompted=0
     local allow_spec=""
     local allow_regex=""
     local unsafe_open_proxy=0
@@ -2322,7 +2357,8 @@ cmd_add_gateway() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --no-ssl|--http) scheme="http" ;;
+            --no-ssl|--http) scheme="http"; scheme_explicit=1 ;;
+            --https) scheme="https"; scheme_explicit=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --allow)
                 shift
@@ -2340,6 +2376,7 @@ cmd_add_gateway() {
 
     if [[ -z "$label" ]]; then
         read -rp "请输入网关域名: " label
+        prompted=1
     fi
     label="$(trim "$label")"
     if ! validate_domain "$label"; then
@@ -2349,6 +2386,7 @@ cmd_add_gateway() {
 
     if [[ -z "$allow_spec" && "$unsafe_open_proxy" -ne 1 ]]; then
         read -rp "允许的上游 host:port 列表（多个用逗号分隔；留空则需确认开放代理）: " allow_spec || true
+        prompted=1
         allow_spec="$(trim "$allow_spec")"
     fi
 
@@ -2366,6 +2404,9 @@ cmd_add_gateway() {
     fi
     if [[ -n "$allow_spec" ]]; then
         allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
+    fi
+    if (( scheme_explicit == 0 && prompted == 1 )); then
+        scheme="$(prompt_tls_scheme)"
     fi
 
     local sanitized old_file new_file file site_block
@@ -2410,6 +2451,8 @@ cmd_add() {
     local label=""
     local port=""
     local scheme="https"
+    local scheme_explicit=0
+    local prompted=0
     local path_prefix=""
     local force_dns_tls=0
     local skip_dns_check=0
@@ -2417,8 +2460,8 @@ cmd_add() {
 
     while (( $# > 0 )); do
         case "$1" in
-            --http) scheme="http" ;;
-            --https) scheme="https" ;;
+            --http|--no-ssl) scheme="http"; scheme_explicit=1 ;;
+            --https) scheme="https"; scheme_explicit=1 ;;
             --dns-only) force_dns_tls=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --path)
@@ -2437,13 +2480,18 @@ cmd_add() {
 
     if [[ -z "$label" ]]; then
         read -rp "站点地址（如 example.com 或 example.com, api.example.com）: " label
+        prompted=1
     fi
     if [[ -z "$port" ]]; then
         read -rp "本地端口: " port
+        prompted=1
     fi
 
     label="$(trim "$label")"
     path_prefix="$(trim "$path_prefix")"
+    if (( scheme_explicit == 0 && prompted == 1 )); then
+        scheme="$(prompt_tls_scheme)"
+    fi
 
     if ! validate_site_label "$label"; then
         fail "站点地址不合法"
@@ -2498,6 +2546,9 @@ cmd_add() {
 cmd_add_static() {
     local label=""
     local site_dir=""
+    local scheme="https"
+    local scheme_explicit=0
+    local prompted=0
     local spa_mode="off"
     local skip_dns_check=0
     local -a positional=()
@@ -2505,6 +2556,8 @@ cmd_add_static() {
     while (( $# > 0 )); do
         case "$1" in
             --spa) spa_mode="on" ;;
+            --http|--no-ssl) scheme="http"; scheme_explicit=1 ;;
+            --https) scheme="https"; scheme_explicit=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-static 参数: $1"; return 1 ;;
@@ -2517,13 +2570,18 @@ cmd_add_static() {
 
     if [[ -z "$label" ]]; then
         read -rp "站点地址（如 static.example.com）: " label
+        prompted=1
     fi
     if [[ -z "$site_dir" ]]; then
         read -rp "静态目录路径: " site_dir
+        prompted=1
     fi
 
     label="$(trim "$label")"
     site_dir="$(trim "$site_dir")"
+    if (( scheme_explicit == 0 && prompted == 1 )); then
+        scheme="$(prompt_tls_scheme)"
+    fi
 
     if [[ "$spa_mode" == "off" ]] && prompt_yes_no "是否按单页应用启用 try_files /index.html？"; then
         spa_mode="on"
@@ -2549,14 +2607,18 @@ cmd_add_static() {
 
     oldbak="$(backup_file_if_exists "$file")"
 
-    build_static_site_block "$label" "$site_dir" "$spa_mode" > "$file"
+    build_static_site_block "$label" "$site_dir" "$spa_mode" "$scheme" > "$file"
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
         fail "已回滚站点修改"
         return 1
     fi
 
-    say "已添加静态站点: $label -> $site_dir"
+    if [[ "$scheme" == "http" ]]; then
+        say "已添加静态站点（HTTP，不申请证书）: $label -> $site_dir"
+    else
+        say "已添加静态站点: $label -> $site_dir"
+    fi
     if [[ ! -d "$site_dir" ]]; then
         say "注意: 当前目录不存在，后续创建后即可由 Caddy 提供访问。"
     fi
@@ -3988,8 +4050,8 @@ cmd_show_help() {
 
 站点管理:
   c list
-  c add <域名> <本地端口> [--http] [--path <前缀>] [--dns-only] [--skip-dns-check]
-  c add-static <域名> <目录> [--spa] [--skip-dns-check]
+  c add <域名> <本地端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
+  c add-static <域名> <目录> [--http|--https] [--spa] [--skip-dns-check]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
   c enable <域名>
   c disable <域名>
@@ -3997,9 +4059,9 @@ cmd_show_help() {
 
 Emby 管理:
   c list-emby
-  c add-emby <域名> <目标地址> [--http] [--skip-dns-check]
-  c add-gateway <域名> --allow <host:port[,host:port...]> [--no-ssl] [--skip-dns-check]
-  c add-gateway <域名> --unsafe-open-proxy [--no-ssl] [--skip-dns-check]
+  c add-emby <域名> <目标地址> [--http|--https] [--skip-dns-check]
+  c add-gateway <域名> --allow <host:port[,host:port...]> [--http|--https] [--skip-dns-check]
+  c add-gateway <域名> --unsafe-open-proxy [--http|--https] [--skip-dns-check]
   c set-emby <Emby域名> [--target <地址>] [--http|--https]
   c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https]
   c rm-emby <Emby域名或网关域名>
