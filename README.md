@@ -108,7 +108,7 @@ c update
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
-- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http/<host>/path` 和 `/https/<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
+- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http://<host>/path` 和 `/https://<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
 
 ## 供应链与安全
 

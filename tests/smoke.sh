@@ -103,10 +103,23 @@ test_add_static_supports_http_mode() {
     APPLY_CONFIG_STATUS=1
 }
 
+test_gateway_uses_full_url_proxy_paths() {
+    local config
+
+    config="$(build_gateway_site_block gate.example.com https "x" "emby.example.com:443")"
+
+    grep -Fq 'https://gate.example.com/https://<上游主机:端口>/路径' <<<"$config" || fail_test "gateway help did not use full URL format"
+    # shellcheck disable=SC2016 # match literal Caddy placeholder rewrite output
+    grep -Fq 'header_down Location ^https://([^/]+)(/.*)$ https://gate.example.com/https://$1$2' <<<"$config" || fail_test "gateway Location rewrite did not use full HTTPS URL format"
+    grep -Fq '@httpsProxy0 path_regexp up_https_0 ^/https:/*emby\.example\.com:443(/.*)' <<<"$config" || fail_test "gateway allowed route did not match /https://source"
+    ! grep -Fq 'https://gate.example.com/https/emby.example.com' <<<"$config" || fail_test "gateway emitted legacy /https/source path"
+}
+
 test_add_emby_propagates_apply_failure
 test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
 test_cmd_set_routes_emby_sites_to_file_updater
 test_add_static_supports_http_mode
+test_gateway_uses_full_url_proxy_paths
 
 printf 'ok - smoke tests passed\n'
