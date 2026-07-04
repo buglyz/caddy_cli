@@ -1713,6 +1713,35 @@ report_tls_file_references() {
     fi
 }
 
+site_file_matches_label() {
+    local file="$1"
+    local query="$2"
+    local raw normalized part
+    local found=0
+    local -A file_labels=()
+    local -a query_parts=()
+
+    [[ -f "$file" ]] || return 1
+
+    while IFS= read -r raw; do
+        normalized="$(normalize_site_name "$raw" 2>/dev/null || true)"
+        [[ -n "$normalized" ]] || continue
+        file_labels["$normalized"]=1
+    done < <(extract_caddy_site_labels "$file")
+
+    IFS=',' read -ra query_parts <<< "$query"
+    for part in "${query_parts[@]}"; do
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        normalized="$(normalize_site_name "$part" 2>/dev/null || true)"
+        [[ -n "$normalized" ]] || return 1
+        [[ -n "${file_labels[$normalized]:-}" ]] || return 1
+        found=1
+    done
+
+    (( found == 1 ))
+}
+
 check_local_upstreams_health() {
     local config_path="$1"
     local mode target hostport host port rc
@@ -1865,7 +1894,7 @@ site_path_for_label() {
     local path="$SITES_DIR/$base.conf"
     local n=1
     while [[ -e "$path" ]]; do
-        if grep -Fq "$label" "$path" 2>/dev/null; then
+        if site_file_matches_label "$path" "$label"; then
             break
         fi
         path="$SITES_DIR/${base}-${n}.conf"
@@ -1889,6 +1918,27 @@ get_primary_label() {
     trim "$label"
 }
 
+format_site_label_for_scheme() {
+    local label="$1"
+    local scheme="$2"
+    local part out=""
+    local -a parts=()
+
+    if [[ "$scheme" != "http" ]]; then
+        printf '%s' "$label"
+        return 0
+    fi
+
+    IFS=',' read -ra parts <<< "$label"
+    for part in "${parts[@]}"; do
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        out="${out:+$out, }http://${part}"
+    done
+
+    printf '%s' "$out"
+}
+
 emit_site_common_blocks() {
     local emit_tls="${1:-yes}"
     cat <<'EOF'
@@ -1903,9 +1953,11 @@ build_reverse_proxy_site_block() {
     local label="$1"
     local port="$2"
     local scheme="$3"
+    local site_label
+    site_label="$(format_site_label_for_scheme "$label" "$scheme")"
 
     cat <<EOF
-$label {
+${site_label} {
 EOF
     if [[ "$scheme" == "http" ]]; then
         emit_site_common_blocks no
@@ -1927,12 +1979,13 @@ build_path_proxy_site_block() {
     local port="$2"
     local path_prefix="$3"
     local scheme="$4"
-    local primary matcher_name
+    local primary matcher_name site_label
     primary="$(get_primary_label "$label")"
     matcher_name="@path_$(sanitize_name "$primary")_$(sanitize_name "$path_prefix")"
+    site_label="$(format_site_label_for_scheme "$label" "$scheme")"
 
     cat <<EOF
-$label {
+${site_label} {
 EOF
     if [[ "$scheme" == "http" ]]; then
         emit_site_common_blocks no
@@ -1970,8 +2023,8 @@ build_static_site_block() {
     local site_dir="$2"
     local spa_mode="$3"
     local scheme="${4:-https}"
-    local site_label="$label"
-    [[ "$scheme" == "http" ]] && site_label="http://${label}"
+    local site_label
+    site_label="$(format_site_label_for_scheme "$label" "$scheme")"
 
     cat <<EOF
 ${site_label} {
@@ -3156,6 +3209,11 @@ find_site_file() {
         basename_no_ext="${basename_no_ext%.disabled}"
         basename_no_ext="${basename_no_ext%.conf}"
         if [[ "$basename_no_ext" == "$normalized" ]]; then
+            echo "$f"
+            shopt -u nullglob
+            return 0
+        fi
+        if site_file_matches_label "$f" "$query"; then
             echo "$f"
             shopt -u nullglob
             return 0

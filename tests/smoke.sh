@@ -103,6 +103,43 @@ test_add_static_supports_http_mode() {
     APPLY_CONFIG_STATUS=1
 }
 
+test_reverse_proxy_builders_support_http_mode() {
+    local config
+
+    config="$(build_reverse_proxy_site_block app.example.com 3000 http)"
+    grep -Fq 'http://app.example.com {' <<<"$config" || fail_test "reverse proxy HTTP site did not use http:// label"
+    ! grep -q 'tls {' <<<"$config" || fail_test "reverse proxy HTTP site unexpectedly emitted TLS block"
+
+    config="$(build_reverse_proxy_site_block "app.example.com, api.example.com" 3000 http)"
+    grep -Fq 'http://app.example.com, http://api.example.com {' <<<"$config" || fail_test "reverse proxy HTTP site did not prefix every label"
+
+    config="$(build_path_proxy_site_block app.example.com 3000 /api http)"
+    grep -Fq 'http://app.example.com {' <<<"$config" || fail_test "path proxy HTTP site did not use http:// label"
+    ! grep -q 'tls {' <<<"$config" || fail_test "path proxy HTTP site unexpectedly emitted TLS block"
+
+    config="$(build_static_site_block "static.example.com, cdn.example.com" /srv/www off http)"
+    grep -Fq 'http://static.example.com, http://cdn.example.com {' <<<"$config" || fail_test "static HTTP site did not prefix every label"
+}
+
+test_http_multi_label_matching_is_scheme_aware() {
+    local label="multi.example.com, api.example.com"
+    local file found repeat_path
+
+    APPLY_CONFIG_STATUS=0 cmd_add "$label" 3000 --http --skip-dns-check >/dev/null 2>&1
+
+    file="$SITES_DIR/multi.example.com__api.example.com.conf"
+    [[ -s "$file" ]] || fail_test "HTTP multi-label site file was not created"
+    grep -Fq 'http://multi.example.com, http://api.example.com {' "$file" || fail_test "HTTP multi-label site did not prefix every label"
+
+    found="$(find_site_file "multi.example.com,api.example.com")"
+    [[ "$found" == "$file" ]] || fail_test "scheme-aware lookup did not find HTTP multi-label site"
+
+    repeat_path="$(site_path_for_label "$label")"
+    [[ "$repeat_path" == "$file" ]] || fail_test "site_path_for_label would create duplicate HTTP multi-label file"
+
+    APPLY_CONFIG_STATUS=1
+}
+
 test_gateway_uses_full_url_proxy_paths() {
     local config
 
@@ -120,6 +157,8 @@ test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
 test_cmd_set_routes_emby_sites_to_file_updater
 test_add_static_supports_http_mode
+test_reverse_proxy_builders_support_http_mode
+test_http_multi_label_matching_is_scheme_aware
 test_gateway_uses_full_url_proxy_paths
 
 printf 'ok - smoke tests passed\n'

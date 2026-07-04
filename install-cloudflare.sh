@@ -388,10 +388,6 @@ install_cli_cf() {
 
 install_debian() {
     require_command apt-get
-    # curl or wget needed for downloads
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        die "Neither curl nor wget available; install one to continue"
-    fi
 
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
 
@@ -425,10 +421,6 @@ install_debian() {
 
 install_alpine() {
     require_command apk
-    # curl or wget needed for downloads (Alpine may only have BusyBox wget)
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        die "Neither curl nor wget available; install one to continue"
-    fi
 
     log "Starting Caddy Cloudflare installer (Alpine Linux)..."
     log "Mode: $([ "$BUILD_FROM_SOURCE" -eq 1 ] && echo 'Build from source' || echo 'Pre-built binary (default)')"
