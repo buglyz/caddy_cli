@@ -269,12 +269,94 @@ enable_and_restart_service_alpine() {
     rc-service caddy restart 2>/dev/null || log "(Warning) Caddy 启动失败，请手动检查配置"
 }
 
+
+# Backup existing Caddy configuration before any install changes.
+# Never overwrites previous backups; uses timestamped directory under /etc/caddy/backup.
+backup_existing_caddy_config() {
+    # Only once per installer process.
+    if [[ "${_CADDY_CLI_PREINSTALL_BACKUP_DONE:-0}" == "1" ]]; then
+        return 0
+    fi
+    _CADDY_CLI_PREINSTALL_BACKUP_DONE=1
+
+    local step="${1:-}"
+    local prefix="${step:+[$step] }"
+    local src_root="/etc/caddy"
+    local stamp bak_dir
+    local -a items=()
+    local item base count=0
+
+    if [[ ! -d "$src_root" ]]; then
+        log "${prefix}No existing $src_root — skip config backup."
+        return 0
+    fi
+
+    # Collect present config artifacts (files and dirs).
+    for item in \
+        "$src_root/Caddyfile" \
+        "$src_root/Caddyfile.bak" \
+        "$src_root/caddyctl.conf" \
+        "$src_root/cloudflare.env" \
+        "$src_root/sites.d" \
+        "$src_root/globals.d"
+    do
+        if [[ -e "$item" ]]; then
+            items+=("$item")
+        fi
+    done
+
+    if (( ${#items[@]} == 0 )); then
+        log "${prefix}No existing Caddyfile/sites.d to backup."
+        return 0
+    fi
+
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    bak_dir="$src_root/backup/pre-install-${stamp}"
+    install -d -m 0755 "$src_root/backup" "$bak_dir"
+
+    for item in "${items[@]}"; do
+        base="$(basename "$item")"
+        if [[ -d "$item" ]]; then
+            # Copy directory contents only if non-empty or always for safety
+            if cp -a "$item" "$bak_dir/$base" 2>/dev/null; then
+                count=$((count + 1))
+            else
+                log "${prefix}(Warning) Failed to backup directory: $item"
+            fi
+        else
+            if cp -a "$item" "$bak_dir/$base" 2>/dev/null; then
+                count=$((count + 1))
+            else
+                log "${prefix}(Warning) Failed to backup file: $item"
+            fi
+        fi
+    done
+
+    # Record a short manifest
+    {
+        echo "time=$stamp"
+        echo "host=$(hostname 2>/dev/null || true)"
+        echo "installer=${0##*/}"
+        echo "items=${#items[@]}"
+        printf '%s\n' "${items[@]}"
+    } > "$bak_dir/MANIFEST.txt" 2>/dev/null || true
+
+    if getent group caddy >/dev/null 2>&1; then
+        chown -R root:caddy "$bak_dir" 2>/dev/null || true
+    fi
+    chmod -R u=rwX,g=rX,o= "$bak_dir" 2>/dev/null || true
+
+    log "${prefix}Backed up existing Caddy config -> $bak_dir ($count item(s))"
+    log "${prefix}Includes: Caddyfile / sites.d / globals.d / caddyctl.conf / cloudflare.env (if present)"
+}
+
 # ── Main ─────────────────────────────────────────────────
 
 install_debian() {
     require_command apt-get
 
     log "Starting Caddy CLI installer (Debian/Ubuntu)..."
+    backup_existing_caddy_config
     install_deps_debian
     require_command gpg
     install_or_keep_caddy_debian
@@ -295,6 +377,7 @@ install_alpine() {
     require_command apk
 
     log "Starting Caddy CLI installer (Alpine Linux)..."
+    backup_existing_caddy_config
     install_deps_alpine
     install_or_keep_caddy_alpine
     install_cli "3/5"
@@ -312,6 +395,8 @@ install_alpine() {
 
 main() {
     require_root
+    # Always snapshot existing Caddy config before any distro-specific steps.
+    backup_existing_caddy_config
     detect_distro
 
     case "$DISTRO" in
