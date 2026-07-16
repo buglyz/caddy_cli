@@ -16,20 +16,10 @@ if [[ ! -f "$LIB_PATH" ]]; then
     LIB_PATH="$(dirname "$(readlink -f /usr/local/bin/c)")/caddy-lib.sh"
 fi
 if [[ ! -f "$LIB_PATH" ]]; then
-    if [[ "${CADDYCTL_ALLOW_REMOTE_LIB:-0}" != "1" ]]; then
-        echo "Fatal: 本地 caddy-lib.sh 未找到。请重新运行安装脚本，或临时设置 CADDYCTL_ALLOW_REMOTE_LIB=1 启用远程加载。" >&2
-        exit 1
-    fi
-    echo "本地 caddy-lib.sh 未找到，按 CADDYCTL_ALLOW_REMOTE_LIB=1 从 GitHub 加载..." >&2
-    LIB_CODE="$(curl -fsSL --retry 2 --connect-timeout 10 "${DEFAULT_BASE_URL}/caddy-lib.sh")" || {
-        echo "Fatal: 无法加载 caddy-lib.sh（本地缺失且 GitHub 不可达）" >&2
-        exit 1
-    }
-    # shellcheck disable=SC1091 # fallback sources downloaded library code from stdin
-    source /dev/stdin <<<"$LIB_CODE"
-else
-    # shellcheck disable=SC1090 # runtime install path is resolved dynamically
-    source "$LIB_PATH"
+    echo "Fatal: 本地 caddy-lib.sh 未找到。请重新运行安装脚本（共享库已拆成入口 + lib/*.sh 模块，不再支持仅远程 source 入口）。" >&2
+    exit 1
 fi
+# shellcheck disable=SC1090 # runtime install path is resolved dynamically
+source "$LIB_PATH"
 
 main "$@"

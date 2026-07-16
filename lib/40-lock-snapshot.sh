@@ -58,7 +58,11 @@ with_global_lock() {
 
     resolve_lock_file
     mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
-    exec {fd}> "$LOCK_FILE"
+    # Open lock file without aborting the whole script if the path is unwritable.
+    if ! { exec {fd}>"$LOCK_FILE"; } 2>/dev/null; then
+        fail "无法创建锁文件: $LOCK_FILE"
+        return 1
+    fi
     if ! acquire_flock "$fd" "$wait_seconds"; then
         fail "获取全局操作锁超时（${wait_seconds}s），请稍后重试。"
         exec {fd}>&-

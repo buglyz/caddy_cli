@@ -28,3 +28,10 @@ c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
 
 Only use `--unsafe-open-proxy` when the gateway is protected by authentication,
 network isolation, or another explicit access-control layer.
+
+
+## Library layout
+
+The shared engine is `caddy-lib.sh` plus modules under `lib/*.sh` (installed to
+`/usr/local/lib/caddyctl`). Remote one-shot `source` of only the entry file is not
+supported; reinstall if the local library is missing.

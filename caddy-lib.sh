@@ -6,8 +6,16 @@ if (( BASH_VERSINFO[0] < 4 )); then
     exit 1
 fi
 
-# Clean up on exit
+# Available before modules load so EXIT trap is always safe.
+cleanup_paths() {
+    rm -rf -- "$@" 2>/dev/null || true
+}
+
+LAST_VALIDATE_LOG=""
 trap 'cleanup_paths "${LAST_VALIDATE_LOG:-}"' EXIT
+
+# Absolute path of this entry file (used by current_library_path after modularization).
+_CADDYCTL_ENTRY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 # Resolve module directory:
 # 1) repo layout: <repo>/lib next to this file
@@ -34,17 +42,20 @@ _CADDYCTL_LIBDIR="$(_caddyctl_resolve_libdir)" || {
     exit 1
 }
 
-# shellcheck disable=SC1090,SC1091 # modules resolved at runtime
-for _caddyctl_mod in \
-    00-core.sh \
-    10-validate.sh \
-    20-config.sh \
-    30-service.sh \
-    40-lock-snapshot.sh \
-    50-sites.sh \
-    60-cmd-sites.sh \
+# Module load order is fixed; filenames are also checksum keys (lib/<name>).
+_CADDYCTL_MODULES=(
+    00-core.sh
+    10-validate.sh
+    20-config.sh
+    30-service.sh
+    40-lock-snapshot.sh
+    50-sites.sh
+    60-cmd-sites.sh
     70-cmd-ops.sh
-do
+)
+
+# shellcheck disable=SC1090,SC1091 # modules resolved at runtime
+for _caddyctl_mod in "${_CADDYCTL_MODULES[@]}"; do
     # shellcheck source=/dev/null
     source "${_CADDYCTL_LIBDIR}/${_caddyctl_mod}"
 done

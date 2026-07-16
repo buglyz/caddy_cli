@@ -124,7 +124,7 @@ c update
 - Cloudflare 版预编译 `caddy` **仅通过 GitHub Release 分发**（仓库不再追踪 46MB 二进制）；安装脚本下载 Release 资产并校验 checksum，不可用时用 `--build-from-source`。
 - `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
 - Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
-- 本地共享库缺失时，CLI 默认不再在线 `source` 远程代码；临时救急可设置 `CADDYCTL_ALLOW_REMOTE_LIB=1`。
+- 本地共享库缺失时请重新运行安装脚本。共享库已拆为入口 + `lib/*.sh` 模块，不再支持仅远程 source 入口文件。
 - `add-gateway` 默认必须配置 allow-list。只有在已有认证、内网隔离或其他访问控制时，才使用 `--unsafe-open-proxy`。
 
 ## 发行版支持

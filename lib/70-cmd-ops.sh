@@ -467,10 +467,12 @@ cmd_install_self() {
     install -m 0644 "$lib_src" "$lib_bin"
 
     # Install modular library files next to entrypoint resolution path
+    local mod_count=0
     if [[ -d "${_CADDYCTL_LIBDIR:-}" ]]; then
         for mod in "$_CADDYCTL_LIBDIR"/*.sh; do
             [[ -f "$mod" ]] || continue
             install -m 0644 "$mod" "$lib_mod_dir/$(basename "$mod")"
+            mod_count=$((mod_count + 1))
         done
     else
         local repo_lib
@@ -479,8 +481,13 @@ cmd_install_self() {
             for mod in "$repo_lib"/*.sh; do
                 [[ -f "$mod" ]] || continue
                 install -m 0644 "$mod" "$lib_mod_dir/$(basename "$mod")"
+                mod_count=$((mod_count + 1))
             done
         fi
+    fi
+    if (( mod_count == 0 )); then
+        fail "未找到任何库模块（期望 $_CADDYCTL_LIBDIR 或 $(dirname "$lib_src")/lib）。请从完整仓库安装。"
+        return 1
     fi
 
     ln -sf "$target_bin" "$target_alias"
@@ -498,16 +505,21 @@ cmd_update() {
     require_command bash
 
     local url lib_url checksums_url base_url tmp tmp_lib target_bin target_alias lib_bin lib_mod_dir
-    local -a modules=(
-        00-core.sh
-        10-validate.sh
-        20-config.sh
-        30-service.sh
-        40-lock-snapshot.sh
-        50-sites.sh
-        60-cmd-sites.sh
-        70-cmd-ops.sh
-    )
+    local -a modules=()
+    if ((${#_CADDYCTL_MODULES[@]} > 0)); then
+        modules=("${_CADDYCTL_MODULES[@]}")
+    else
+        modules=(
+            00-core.sh
+            10-validate.sh
+            20-config.sh
+            30-service.sh
+            40-lock-snapshot.sh
+            50-sites.sh
+            60-cmd-sites.sh
+            70-cmd-ops.sh
+        )
+    fi
     local -a tmp_mods=()
     local mod tmp_mod
 
@@ -521,8 +533,10 @@ cmd_update() {
     lib_bin="/usr/local/bin/caddy-lib.sh"
     lib_mod_dir="/usr/local/lib/caddyctl"
 
+    tmp=""
+    tmp_lib=""
     cleanup_update_temps() {
-        cleanup_paths "$tmp" "$tmp_lib" "${tmp_mods[@]}"
+        cleanup_paths "${tmp:-}" "${tmp_lib:-}" "${tmp_mods[@]}"
     }
 
     # 1) 下载并校验前端脚本

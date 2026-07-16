@@ -130,18 +130,34 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+_is_caddyctl_library_file() {
+    local src base
+    src="$1"
+    base="$(basename "$src")"
+    [[ "$base" == "caddy-lib.sh" ]] && return 0
+    # Modular library files: 00-core.sh ... 70-cmd-ops.sh
+    [[ "$base" == [0-9][0-9]-*.sh ]] && return 0
+    if [[ -n "${_CADDYCTL_LIBDIR:-}" ]]; then
+        case "$src" in
+            "$_CADDYCTL_LIBDIR"/*) return 0 ;;
+        esac
+    fi
+    return 1
+}
+
 current_script_path() {
     local src base
+    # Prefer the real frontend (caddy.sh / caddy-cloudflare / caddyctl), never a library module.
     for src in "${BASH_SOURCE[@]}"; do
         [[ -n "$src" && -f "$src" ]] || continue
-        base="$(basename "$src")"
-        [[ "$base" == "caddy-lib.sh" ]] && continue
+        _is_caddyctl_library_file "$src" && continue
         printf '%s\n' "$src"
         return 0
     done
     if [[ -n "${0:-}" && -f "${0}" ]]; then
         base="$(basename "$0")"
         [[ "$base" == "bash" || "$base" == "sh" ]] && return 1
+        _is_caddyctl_library_file "$0" && return 1
         printf '%s\n' "$0"
         return 0
     fi
@@ -149,6 +165,11 @@ current_script_path() {
 }
 
 current_library_path() {
+    # Set by caddy-lib.sh entry when sourced; reliable after modular split.
+    if [[ -n "${_CADDYCTL_ENTRY:-}" && -f "$_CADDYCTL_ENTRY" ]]; then
+        printf '%s\n' "$_CADDYCTL_ENTRY"
+        return 0
+    fi
     local src
     for src in "${BASH_SOURCE[@]}"; do
         [[ -n "$src" && -f "$src" ]] || continue
