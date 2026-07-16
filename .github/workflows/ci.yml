@@ -26,6 +26,7 @@ jobs:
           set -euo pipefail
           scripts=(
             caddy-lib.sh
+            lib/*.sh
             caddy.sh
             caddy-cloudflare.sh
             install.sh
@@ -269,6 +270,7 @@ jobs:
         run: |
           shellcheck -x \
             caddy-lib.sh \
+            lib/*.sh \
             caddy.sh \
             caddy-cloudflare.sh \
             install.sh \

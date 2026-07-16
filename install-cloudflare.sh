@@ -357,16 +357,38 @@ install_cli_cf() {
     local step="$1"
     log "[${step}] Installing c command (Cloudflare edition)..."
 
-    local tmp_lib
-    tmp_lib="$(mktemp)"
-    local tmp_cli
+    local tmp_lib tmp_cli lib_mod_dir
+    local -a modules=(
+        00-core.sh
+        10-validate.sh
+        20-config.sh
+        30-service.sh
+        40-lock-snapshot.sh
+        50-sites.sh
+        60-cmd-sites.sh
+        70-cmd-ops.sh
+    )
+    local -a tmp_mods=()
+    local mod tmp_mod
+    tmp_lib=""
     tmp_cli=""
-    trap 'rm -f "$tmp_lib" "$tmp_cli"' RETURN
+    lib_mod_dir="/usr/local/lib/caddyctl"
+    trap 'rm -f "$tmp_lib" "$tmp_cli" "${tmp_mods[@]}"' RETURN
 
+    tmp_lib="$(mktemp)"
     safe_download "$LIB_URL" "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
     verify_checksum "$tmp_lib" "caddy-lib.sh"
     bash -n "$tmp_lib"
+
+    for mod in "${modules[@]}"; do
+        tmp_mod="$(mktemp)"
+        tmp_mods+=("$tmp_mod")
+        safe_download "${CADDY_CLI_BASE_URL}/lib/${mod}" "$tmp_mod"
+        [[ -s "$tmp_mod" ]] || die "Downloaded module is empty: $mod"
+        verify_checksum "$tmp_mod" "lib/${mod}"
+        bash -n "$tmp_mod"
+    done
 
     tmp_cli="$(mktemp)"
     safe_download "$CADDY_CF_URL" "$tmp_cli"
@@ -374,10 +396,16 @@ install_cli_cf() {
     verify_checksum "$tmp_cli" "caddy-cloudflare"
     bash -n "$tmp_cli"
 
+    install -d -m 0755 "$lib_mod_dir"
     install -m 0644 "$tmp_lib" "$LIB_BIN"
+    local i=0
+    for mod in "${modules[@]}"; do
+        install -m 0644 "${tmp_mods[$i]}" "$lib_mod_dir/$mod"
+        i=$((i + 1))
+    done
     install -m 0755 "$tmp_cli" "$CLI_BIN"
     ln -sf "$CLI_BIN" "$CLI_ALIAS"
-    rm -f "$tmp_lib" "$tmp_cli"
+    rm -f "$tmp_lib" "$tmp_cli" "${tmp_mods[@]}"
     trap - RETURN
 }
 

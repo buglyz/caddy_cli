@@ -4,9 +4,10 @@
 
 | 文件 | 说明 |
 |------|------|
-| `caddy-lib.sh` | 共享引擎（hook 架构，所有公共逻辑） |
-| `caddy.sh` | 标准版前端（27 行，source 共享库） |
-| `caddy-cloudflare` | Cloudflare DNS 版前端（override 10 个 hook 注入 CF 功能） |
+| `caddy-lib.sh` | 共享库入口（加载 `lib/*.sh` 模块） |
+| `lib/*.sh` | 按职责拆分的共享模块（core/validate/config/service/sites/cmds…） |
+| `caddy.sh` | 标准版前端（source 共享库） |
+| `caddy-cloudflare` | Cloudflare DNS 版前端（override hook 注入 CF 功能） |
 | `install.sh` | 标准版一键安装（自动检测 Debian/Alpine） |
 | `install-cloudflare.sh` | Cloudflare DNS 版一键安装（含预编译 Caddy 二进制） |
 
@@ -148,7 +149,8 @@ c update
 | `/var/log/caddy` | 访问日志 |
 | `/usr/local/bin/caddyctl` | 脚本本体 |
 | `/usr/local/bin/c` | `caddyctl` 软链 |
-| `/usr/local/bin/caddy-lib.sh` | 共享库 |
+| `/usr/local/bin/caddy-lib.sh` | 共享库入口 |
+| `/usr/local/lib/caddyctl/*.sh` | 共享库模块 |
 
 ## 排障
 
