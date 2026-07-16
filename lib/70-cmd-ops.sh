@@ -1212,29 +1212,34 @@ show_menu_header() {
     echo "====== $title ======"
 }
 
+# 主菜单：站点优先；相似功能相邻
 menu_main() {
     show_menu_header "Caddy CLI 管理面板"
     echo ""
     echo "【站点】"
-    echo "1. 站点管理（反代 / 静态）"
+    echo "1. 普通站点（反代 / 静态）"
     echo "2. Emby / 网关"
     echo "3. 查看所有站点"
     echo ""
-    echo "【运维】"
-    echo "4. 服务状态"
-    echo "5. 实时日志"
-    echo "6. 服务与配置"
-    echo "7. 诊断与备份"
+    echo "【服务】"
+    echo "4. 启动 / 重启 / 停止"
+    echo "5. 服务状态"
+    echo "6. 实时日志"
+    echo ""
+    echo "【配置】"
+    echo "7. 配置 / 导入 / 全局设置"
+    echo "8. 诊断 / 证书 / 备份回滚"
     echo ""
     echo "【系统】"
-    echo "8. 安装与更新"
+    echo "9. 安装与更新"
     echo ""
     echo "0. 退出"
     echo "============================"
 }
 
+# 查看 → 添加 → 修改 → 启停 → 删除
 menu_sites() {
-    show_menu_header "站点管理 · 反代 / 静态"
+    show_menu_header "普通站点 · 反代 / 静态"
     echo ""
     echo "【查看】"
     echo "1. 查看所有站点"
@@ -1244,8 +1249,12 @@ menu_sites() {
     echo "3. 添加静态网站"
     echo ""
     echo "【修改】"
-    echo "4. 修改站点（set / set-static）"
+    echo "4. 修改站点（端口 / 路径 / 静态目录 / 协议）"
+    echo ""
+    echo "【启停】"
     echo "5. 启用 / 禁用站点"
+    echo ""
+    echo "【删除】"
     echo "6. 删除站点"
     echo ""
     echo "0. 返回上一级"
@@ -1264,29 +1273,42 @@ menu_emby() {
     echo ""
     echo "【修改】"
     echo "4. 修改 Emby / 网关"
+    echo ""
+    echo "【删除】"
     echo "5. 删除 Emby / 网关"
     echo ""
     echo "0. 返回上一级"
     echo "======================"
 }
 
-menu_config() {
-    show_menu_header "服务与配置"
+menu_service() {
+    show_menu_header "服务控制"
     echo ""
-    echo "【服务】"
     echo "1. 启动 Caddy"
     echo "2. 重启 Caddy"
     echo "3. 停止 Caddy"
     echo "4. 查看服务状态"
+    echo "5. 实时日志"
     echo ""
-    echo "【配置】"
-    echo "5. 查看当前 Caddyfile"
-    echo "6. 校验并应用配置"
-    echo "7. 全局设置（邮箱 / 超时 / 上游）"
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_config() {
+    show_menu_header "配置 / 导入 / 全局设置"
+    echo ""
+    echo "【查看与应用】"
+    echo "1. 查看当前 Caddyfile"
+    echo "2. 校验配置"
+    echo "3. 应用配置（reload）"
+    echo "4. 校验并应用"
     echo ""
     echo "【导入】"
-    echo "8. 导入配置（替换 sites.d）"
-    echo "9. 合并导入（--merge）"
+    echo "5. 替换导入（清空 sites.d）"
+    echo "6. 合并导入（--merge）"
+    echo ""
+    echo "【全局设置】"
+    echo "7. 邮箱 / 超时 / 上游检查"
     echo ""
     _hook_menu_config_items
     echo "0. 返回上一级"
@@ -1294,16 +1316,16 @@ menu_config() {
 }
 
 menu_diagnostics() {
-    show_menu_header "诊断与备份"
+    show_menu_header "诊断 / 证书 / 备份回滚"
     echo ""
     echo "【诊断】"
     echo "1. 环境检查（doctor）"
-    echo "2. 查看 Caddy 日志"
+    echo "2. 实时日志"
     echo "3. 证书诊断"
     echo ""
     echo "【备份回滚】"
     echo "4. 查看回滚快照"
-    echo "5. 回滚到上一步 / 指定快照"
+    echo "5. 回滚（上一步 / 指定快照）"
     echo ""
     echo "0. 返回上一级"
     echo "======================"
@@ -1312,10 +1334,13 @@ menu_diagnostics() {
 menu_install() {
     show_menu_header "安装与更新"
     echo ""
+    echo "【安装】"
     echo "1. 安装 / 初始化 Caddy"
-    echo "2. 安装本机 CLI 命令（install-self）"
+    echo "2. 安装本机 CLI（install-self）"
+    echo ""
+    echo "【更新】"
     echo "3. 更新 CLI 脚本与模块"
-    echo "4. 更新 CLI + Caddy 二进制（--binary）"
+    echo "4. 更新 CLI + Caddy 二进制"
     echo ""
     echo "0. 返回上一级"
     echo "======================"
@@ -1358,21 +1383,37 @@ interactive_emby_menu() {
     done
 }
 
-interactive_config_menu() {
+interactive_service_menu() {
     local choice=""
     while true; do
-        menu_config
+        menu_service
         read -rp "选择: " choice
         case "$choice" in
             1) with_global_lock cmd_start ;;
             2) with_global_lock cmd_restart ;;
             3) with_global_lock cmd_stop ;;
             4) cmd_status ;;
-            5) cmd_config ;;
-            6) require_command caddy; with_global_lock run_mutation validate-apply cmd_validate_and_apply ;;
+            5) cmd_logs ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_config_menu() {
+    local choice=""
+    while true; do
+        menu_config
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_config ;;
+            2) require_command caddy; cmd_validate ;;
+            3) require_command caddy; with_global_lock run_mutation apply cmd_apply ;;
+            4) require_command caddy; with_global_lock run_mutation validate-apply cmd_validate_and_apply ;;
+            5) require_command caddy; with_global_lock run_mutation import cmd_import ;;
+            6) require_command caddy; with_global_lock run_mutation import-merge cmd_import --merge ;;
             7) cmd_settings_menu ;;
-            8) require_command caddy; with_global_lock run_mutation import cmd_import ;;
-            9) require_command caddy; with_global_lock run_mutation import-merge cmd_import --merge ;;
             0) return 0 ;;
             *)
                 if _hook_menu_config_handler "$choice"; then
@@ -1430,235 +1471,18 @@ interactive_menu() {
             1) interactive_sites_menu ;;
             2) interactive_emby_menu ;;
             3) cmd_list; pause_menu ;;
-            4) cmd_status; pause_menu ;;
-            5) cmd_logs; pause_menu ;;
-            6) interactive_config_menu ;;
-            7) interactive_diagnostics_menu ;;
-            8) interactive_install_menu ;;
+            4) interactive_service_menu ;;
+            5) cmd_status; pause_menu ;;
+            6) cmd_logs; pause_menu ;;
+            7) interactive_config_menu ;;
+            8) interactive_diagnostics_menu ;;
+            9) interactive_install_menu ;;
             0) exit 0 ;;
             *) fail "无效输入"; pause_menu ;;
         esac
     done
 }
 
-
-main() {
-    show_menu_header "Caddy CLI 管理面板"
-    echo ""
-    echo "【快速操作】"
-    echo "1. 查看所有站点状态"
-    echo "2. 重启 Caddy 服务"
-    echo "3. 查看实时日志"
-    echo ""
-    echo "【站点管理】"
-    echo "4. 站点管理"
-    echo "5. Emby 专用管理"
-    echo ""
-    echo "【系统管理】"
-    echo "6. 服务与配置"
-    echo "7. 诊断与维护"
-    echo "8. 安装与更新"
-    echo ""
-    echo "0. 退出"
-    echo "============================"
-}
-
-menu_sites() {
-    show_menu_header "站点管理"
-    echo ""
-    echo "【查看】"
-    echo "1. 查看所有站点"
-    echo ""
-    echo "【添加站点】"
-    echo "2. 添加反向代理"
-    echo "3. 添加静态网站"
-    echo ""
-    echo "【管理站点】"
-    echo "4. 修改站点配置"
-    echo "5. 启用/禁用站点"
-    echo "6. 删除站点"
-    echo ""
-    echo "0. 返回上一级"
-    echo "======================"
-}
-
-menu_emby() {
-    show_menu_header "Emby 专用管理"
-    echo ""
-    echo "【查看】"
-    echo "1. 查看 Emby 配置"
-    echo ""
-    echo "【添加】"
-    echo "2. 添加固定反代"
-    echo "3. 添加通用网关"
-    echo ""
-    echo "【管理】"
-    echo "4. 修改配置"
-    echo "5. 删除配置"
-    echo ""
-    echo "0. 返回上一级"
-    echo "======================"
-}
-
-menu_config() {
-    show_menu_header "服务与配置"
-    echo ""
-    echo "【服务控制】"
-    echo "1. 启动 Caddy"
-    echo "2. 重启 Caddy"
-    echo "3. 停止 Caddy"
-    echo "4. 查看服务状态"
-    echo ""
-    echo "【配置管理】"
-    echo "5. 查看当前配置"
-    echo "6. 校验并应用配置"
-    echo "7. 配置设置（邮箱/超时/上游）"
-    echo ""
-    echo "【高级操作】"
-    echo "8. 导入现有配置"
-    echo ""
-    _hook_menu_config_items
-    echo "0. 返回上一级"
-    echo "======================"
-}
-
-menu_diagnostics() {
-    show_menu_header "诊断与维护"
-    echo ""
-    echo "【诊断工具】"
-    echo "1. 环境检查"
-    echo "2. 查看 Caddy 日志"
-    echo "3. 证书诊断"
-    echo ""
-    echo "【备份回滚】"
-    echo "4. 查看回滚快照"
-    echo "5. 回滚到上一步"
-    echo ""
-    echo "0. 返回上一级"
-    echo "======================"
-}
-
-menu_install() {
-    show_menu_header "安装与更新"
-    echo "1. 安装/初始化 Caddy"
-    echo "2. 安装脚本命令"
-    echo "3. 更新脚本"
-    echo "0. 返回上一级"
-    echo "======================"
-}
-
-interactive_sites_menu() {
-    local choice=""
-    while true; do
-        menu_sites
-        read -rp "选择: " choice
-        case "$choice" in
-            1) cmd_list ;;
-            2) require_command caddy; with_global_lock run_mutation add cmd_add ;;
-            3) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
-            4) require_command caddy; with_global_lock run_mutation set cmd_set ;;
-            5) require_command caddy; with_global_lock run_mutation toggle cmd_toggle_site ;;
-            6) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
-            0) return 0 ;;
-            *) fail "无效输入" ;;
-        esac
-        pause_menu
-    done
-}
-
-interactive_emby_menu() {
-    local choice=""
-    while true; do
-        menu_emby
-        read -rp "选择: " choice
-        case "$choice" in
-            1) cmd_list_emby ;;
-            2) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
-            3) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
-            4) require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby ;;
-            5) require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby ;;
-            0) return 0 ;;
-            *) fail "无效输入" ;;
-        esac
-        pause_menu
-    done
-}
-
-interactive_config_menu() {
-    local choice=""
-    while true; do
-        menu_config
-        read -rp "选择: " choice
-        case "$choice" in
-            1) with_global_lock cmd_start ;;
-            2) with_global_lock cmd_restart ;;
-            3) with_global_lock cmd_stop ;;
-            4) cmd_status ;;
-            5) cmd_config ;;
-            6) require_command caddy; with_global_lock run_mutation validate-apply cmd_validate_and_apply ;;
-            7) cmd_settings_menu ;;
-            8) require_command caddy; with_global_lock run_mutation import cmd_import ;;
-            0) return 0 ;;
-            *) _hook_menu_config_handler "$choice" && continue ;&
-            *) fail "无效输入" ;;
-        esac
-        pause_menu
-    done
-}
-
-interactive_diagnostics_menu() {
-    local choice=""
-    while true; do
-        menu_diagnostics
-        read -rp "选择: " choice
-        case "$choice" in
-            1) cmd_doctor ;;
-            2) cmd_logs ;;
-            3) cmd_cert_check ;;
-            4) cmd_snapshots ;;
-            5) require_command caddy; with_global_lock cmd_undo ;;
-            0) return 0 ;;
-            *) fail "无效输入" ;;
-        esac
-        pause_menu
-    done
-}
-
-interactive_install_menu() {
-    local choice=""
-    while true; do
-        menu_install
-        read -rp "选择: " choice
-        case "$choice" in
-            1) with_global_lock cmd_install ;;
-            2) with_global_lock cmd_install_self ;;
-            3) with_global_lock cmd_update ;;
-            0) return 0 ;;
-            *) fail "无效输入" ;;
-        esac
-        pause_menu
-    done
-}
-
-interactive_menu() {
-    local choice=""
-    while true; do
-        menu_main
-        read -rp "选择: " choice
-        case "$choice" in
-            1) cmd_list; pause_menu ;;
-            2) with_global_lock cmd_restart; pause_menu ;;
-            3) cmd_logs; pause_menu ;;
-            4) interactive_sites_menu ;;
-            5) interactive_emby_menu ;;
-            6) interactive_config_menu ;;
-            7) interactive_diagnostics_menu ;;
-            8) interactive_install_menu ;;
-            0) exit 0 ;;
-            *) fail "无效输入"; pause_menu ;;
-        esac
-    done
-}
 
 main() {
     local cmd="${1:-}"
