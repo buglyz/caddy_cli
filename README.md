@@ -217,3 +217,29 @@ sudo c update --ref main --binary
 
 当前默认安装 ref：`v2.11.3-cloudflare-r13`（之后可用 `c update --ref main` 拿菜单等最新 UX）。
 
+## 安装后自动导入现有配置
+
+安装脚本会：
+
+1. **先备份** 现有 `/etc/caddy/Caddyfile`、`sites.d` 等 → `/etc/caddy/backup/pre-install-<时间戳>/`
+2. 若存在**非空 Caddyfile** 且 **sites.d 为空**，写入标记  
+   `/etc/caddy/.caddyctl-pending-import`
+3. **安装完成后第一次运行** `c` / `c list` / `c doctor` 等（root）时，自动执行：  
+   `c import --force /etc/caddy/Caddyfile` 并 `c apply`
+
+跳过自动导入：
+
+```bash
+sudo CADDYCTL_SKIP_AUTO_IMPORT=1 c list
+# 或安装时
+sudo CADDYCTL_SKIP_AUTO_IMPORT=1 bash install-cloudflare.sh
+```
+
+手动导入：
+
+```bash
+sudo c import --force /etc/caddy/Caddyfile
+# 已有 sites.d 时合并
+sudo c import --merge /etc/caddy/Caddyfile
+```
+

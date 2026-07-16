@@ -1533,6 +1533,56 @@ interactive_menu() {
 }
 
 
+
+# First CLI run after install: import pre-existing Caddyfile into sites.d once.
+maybe_auto_import_existing_config() {
+    [[ "${CADDYCTL_SKIP_AUTO_IMPORT:-0}" == "1" ]] && return 0
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || return 0
+
+    local marker="${CADDYCTL_PENDING_IMPORT_MARKER:-/etc/caddy/.caddyctl-pending-import}"
+    local failed="${marker}.failed"
+    [[ -f "$marker" ]] || return 0
+
+    if [[ ! -s "${CADDYFILE:-/etc/caddy/Caddyfile}" ]]; then
+        rm -f "$marker" 2>/dev/null || true
+        return 0
+    fi
+
+    # If sites.d already populated (user added sites before first import), abort quietly.
+    shopt -s nullglob
+    local existing=("$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled)
+    shopt -u nullglob
+    if (( ${#existing[@]} > 0 )); then
+        say "检测到 pending 自动导入标记，但 sites.d 已有站点，已取消自动导入。"
+        say "如需合并请手动: c import --merge $CADDYFILE"
+        rm -f "$marker" 2>/dev/null || true
+        return 0
+    fi
+
+    say "首次运行：正在导入安装前已有的 Caddyfile → sites.d ..."
+    say "  源: $CADDYFILE"
+    say "  跳过: CADDYCTL_SKIP_AUTO_IMPORT=1"
+
+    # Non-interactive force replace (sites.d empty). Use subshell-safe env.
+    if CADDYCTL_IMPORT_FORCE=1 cmd_import --force "$CADDYFILE"; then
+        rm -f "$marker" "$failed" 2>/dev/null || true
+        say "自动导入完成。正在应用配置..."
+        if require_command caddy 2>/dev/null && cmd_apply; then
+            say "自动导入并应用成功。"
+        else
+            say "已导入到 sites.d；应用失败请检查后执行: c apply"
+        fi
+        return 0
+    fi
+
+    say "自动导入失败。已保留标记失败状态，避免反复重试。"
+    say "可手动: c import --force $CADDYFILE"
+    say "或清除标记: rm -f $marker"
+    mv -f "$marker" "$failed" 2>/dev/null || rm -f "$marker" 2>/dev/null || true
+    return 1
+}
+
+
 main() {
     local cmd="${1:-}"
 
@@ -1572,6 +1622,7 @@ main() {
             if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
                 ensure_dirs
                 load_state
+                maybe_auto_import_existing_config || true
             else
                 if [[ -r "$STATE_FILE" ]]; then
                     load_state
@@ -1597,6 +1648,7 @@ main() {
     ensure_dirs
     load_state
     fix_permissions
+    maybe_auto_import_existing_config || true
 
     case "$cmd" in
         install) with_global_lock cmd_install ;;

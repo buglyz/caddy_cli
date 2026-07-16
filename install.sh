@@ -350,6 +350,54 @@ backup_existing_caddy_config() {
     log "${prefix}Includes: Caddyfile / sites.d / globals.d / caddyctl.conf / cloudflare.env (if present)"
 }
 
+
+# If an unmanaged Caddyfile exists and sites.d is empty, mark for first-run auto-import.
+mark_pending_first_import_if_needed() {
+    local caddyfile="/etc/caddy/Caddyfile"
+    local sites_dir="/etc/caddy/sites.d"
+    local marker="/etc/caddy/.caddyctl-pending-import"
+
+    if [[ "${CADDYCTL_SKIP_AUTO_IMPORT:-0}" == "1" ]]; then
+        log "CADDYCTL_SKIP_AUTO_IMPORT=1 — skip pending import mark."
+        return 0
+    fi
+
+    [[ -s "$caddyfile" ]] || {
+        log "No existing Caddyfile content — nothing to auto-import later."
+        return 0
+    }
+
+    # Already managed by caddyctl with site files → leave as-is.
+    if grep -q 'managed by caddyctl' "$caddyfile" 2>/dev/null; then
+        if compgen -G "$sites_dir/*.conf" >/dev/null 2>&1; then
+            log "Existing caddyctl-managed layout detected — skip auto-import mark."
+            rm -f "$marker" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    # sites.d already has configs: do not schedule a destructive replace import.
+    if compgen -G "$sites_dir/*.conf" >/dev/null 2>&1 || \
+       compgen -G "$sites_dir/*.conf.disabled" >/dev/null 2>&1; then
+        log "sites.d already has site files — skip auto-import mark (use: c import --merge)."
+        return 0
+    fi
+
+    # Heuristic: file should look like a Caddyfile (site block or global block).
+    if ! grep -Eq '^[[:space:]]*[{a-zA-Z0-9_*:./$]|\{' "$caddyfile" 2>/dev/null; then
+        log "Caddyfile does not look like site config — skip auto-import mark."
+        return 0
+    fi
+
+    install -d -m 0755 /etc/caddy
+    : > "$marker"
+    chmod 644 "$marker" 2>/dev/null || true
+    log "Marked first-run auto-import: existing Caddyfile will be imported on next 'c' command."
+    log "  marker: $marker"
+    log "  source: $caddyfile"
+    log "  skip:   CADDYCTL_SKIP_AUTO_IMPORT=1 c <cmd>"
+}
+
 # ── Main ─────────────────────────────────────────────────
 
 install_debian() {
@@ -362,6 +410,7 @@ install_debian() {
     install_or_keep_caddy_debian
     install_cli "5/7"
     init_layout_and_permissions "6/7"
+    mark_pending_first_import_if_needed
     enable_and_restart_service_debian
 
     echo
@@ -382,6 +431,7 @@ install_alpine() {
     install_or_keep_caddy_alpine
     install_cli "3/5"
     init_layout_and_permissions "4/5"
+    mark_pending_first_import_if_needed
     enable_and_restart_service_alpine
 
     echo

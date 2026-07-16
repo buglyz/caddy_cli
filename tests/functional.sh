@@ -742,6 +742,40 @@ fi
   fi
 )
 
+
+# ─────────────────────────────────────────────
+section "16) first-run auto-import marker path"
+# ─────────────────────────────────────────────
+# Simulate empty sites.d + existing Caddyfile content via cmd_import force path already tested.
+# Unit-test maybe_auto_import_existing_config with a marker.
+marker="$tmpdir/.pending-import-test"
+export CADDYCTL_PENDING_IMPORT_MARKER="$marker"
+# clear sites
+rm -f "$SITES_DIR"/*.conf 2>/dev/null || true
+cat >"$CADDYFILE" <<'EOF'
+{
+    email autoimport@example.com
+}
+autoimport.example.com {
+    reverse_proxy 127.0.0.1:19999
+}
+EOF
+: >"$marker"
+assert_ok "auto-import on marker" maybe_auto_import_existing_config
+if [[ ! -f "$marker" ]]; then
+    tpass "pending marker removed after success"
+else
+    tfail "pending marker removed after success"
+fi
+if find_site_file autoimport.example.com >/dev/null 2>&1; then
+    tpass "auto-import created site conf"
+else
+    tfail "auto-import created site conf"
+fi
+# second call no-op
+assert_ok "auto-import second call noop" maybe_auto_import_existing_config
+unset CADDYCTL_PENDING_IMPORT_MARKER
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))
