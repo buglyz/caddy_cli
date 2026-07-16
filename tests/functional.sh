@@ -728,6 +728,20 @@ else
     tfail "update_caddy_binary_from_release defined"
 fi
 
+
+# update --ref parsing (no network)
+(
+  set +e
+  # dry: only ensure case accepts --ref without network by stubbing curl? skip network
+  # just verify help mentions --ref
+  out="$(cmd_show_help 2>/dev/null || true)"
+  if printf '%s' "$out" | grep -q -- '--ref'; then
+    tpass "help mentions update --ref"
+  else
+    tfail "help mentions update --ref"
+  fi
+)
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

@@ -195,3 +195,25 @@ c update --binary
 
 `c set` 对普通反代/路径反代/静态站会尽量保留自定义 `header` / `basic_auth` / `log` 等指令；网关与 Emby 模板仅保留这些白名单指令，避免 matcher 泄漏。
 
+## 从旧版（r9 等）升级
+
+`c update` **会跟随当前已安装脚本里的 `DEFAULT_REF`**。  
+若本机还是 r9，直接 `c update` 会继续下载 r9。
+
+一次跳到最新：
+
+```bash
+# 推荐（CF 版）
+sudo CADDY_CLI_REF=main bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install-cloudflare.sh)'
+
+# 或仅更新 CLI（本机已是较新版本且支持 --ref）
+sudo c update --ref main
+# 等价
+sudo CADDY_CLI_REF=main c update
+
+# 连同预编译 caddy 二进制
+sudo c update --ref main --binary
+```
+
+当前默认安装 ref：`v2.11.3-cloudflare-r13`（之后可用 `c update --ref main` 拿菜单等最新 UX）。
+

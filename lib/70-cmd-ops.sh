@@ -505,18 +505,53 @@ cmd_update() {
     require_command bash
 
     local update_binary=0
+    local update_ref=""
     local -a update_positional=()
     while (( $# > 0 )); do
         case "$1" in
             --binary|--with-binary) update_binary=1 ;;
+            --ref)
+                shift
+                [[ $# -gt 0 ]] || { fail "--ref 需要版本/tag/分支，例如 v2.11.3-cloudflare-r13 或 main"; return 1; }
+                update_ref="$1"
+                ;;
+            --ref=*)
+                update_ref="${1#--ref=}"
+                ;;
+            --latest|--main)
+                update_ref="main"
+                ;;
             --) shift; while (( $# > 0 )); do update_positional+=("$1"); shift; done; break ;;
-            --*) fail "未知 update 参数: $1"; return 1 ;;
+            --*) fail "未知 update 参数: $1（支持: --binary --ref <tag|branch> --latest）"; return 1 ;;
             *) update_positional+=("$1") ;;
         esac
         shift
     done
 
+    # Resolve download base. Priority:
+    #   1) --ref / CADDY_CLI_REF explicit override
+    #   2) CADDYCTL_UPDATE_URL full URL override
+    #   3) DEFAULT_* baked into the currently installed frontend (can be stale!)
     local url lib_url checksums_url base_url tmp tmp_lib target_bin target_alias lib_bin lib_mod_dir
+    local frontend_name="caddy.sh"
+    if [[ -n "${DEFAULT_UPDATE_URL:-}" && "${DEFAULT_UPDATE_URL}" == *caddy-cloudflare* ]]; then
+        frontend_name="caddy-cloudflare"
+    elif [[ -L /usr/local/bin/caddyctl ]] || [[ -f /usr/local/bin/caddyctl ]]; then
+        if grep -q 'caddy-cloudflare' /usr/local/bin/caddyctl 2>/dev/null ||            grep -q 'Cloudflare DNS' /usr/local/bin/caddyctl 2>/dev/null; then
+            frontend_name="caddy-cloudflare"
+        fi
+    fi
+
+    if [[ -n "$update_ref" ]]; then
+        export CADDY_CLI_REF="$update_ref"
+        base_url="https://raw.githubusercontent.com/buglyz/caddy_cli/${update_ref}"
+        url="${base_url}/${frontend_name}"
+        say "使用指定版本/分支: $update_ref"
+    elif [[ -n "${CADDY_CLI_REF:-}" && -z "${CADDYCTL_UPDATE_URL:-}" ]]; then
+        base_url="https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}"
+        url="${base_url}/${frontend_name}"
+        say "使用环境变量 CADDY_CLI_REF=$CADDY_CLI_REF"
+    fi
     local -a modules=()
     # Under 'set -u', ${#_CADDYCTL_MODULES[@]} aborts if the array is unset.
     if declare -p _CADDYCTL_MODULES >/dev/null 2>&1 && ((${#_CADDYCTL_MODULES[@]} > 0)); then
@@ -536,10 +571,21 @@ cmd_update() {
     local -a tmp_mods=()
     local mod tmp_mod
 
-    url="${CADDYCTL_UPDATE_URL:-$DEFAULT_UPDATE_URL}"
-    base_url="${url%/*}"
+    if [[ -z "${url:-}" ]]; then
+        url="${CADDYCTL_UPDATE_URL:-$DEFAULT_UPDATE_URL}"
+    fi
+    if [[ -z "${base_url:-}" ]]; then
+        base_url="${url%/*}"
+    fi
     lib_url="${base_url}/caddy-lib.sh"
     checksums_url="${CADDYCTL_CHECKSUMS_URL:-${base_url}/checksums.txt}"
+    say "更新源: $url"
+    if [[ "$url" == *'/v2.11.3-cloudflare-r9/'* || "$url" == *'/v2.11.3-cloudflare-r10/'* ]]; then
+        say "提示: 当前前端写死了旧 ref。可一次跳到最新:"
+        say "  sudo CADDY_CLI_REF=main c update"
+        say "  或: sudo c update --ref main"
+        say "  或重装: bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install-cloudflare.sh)"
+    fi
 
     target_bin="/usr/local/bin/caddyctl"
     target_alias="/usr/local/bin/c"
@@ -874,7 +920,10 @@ cmd_show_help() {
 ────────────────────────────────
   c install
   c install-self
-  c update [--binary]    # --binary 同时更新 Release 中的 caddy 可执行文件
+  c update [--ref <tag|branch>] [--binary] [--latest]
+  # 默认跟随本机脚本内 DEFAULT_REF（旧安装可能卡在 r9）。
+  # 跳出版本: c update --ref main   或  CADDY_CLI_REF=main c update
+  # --binary 同时从 GitHub Release 更新 caddy 可执行文件
   c menu                 # 交互菜单
 
 说明:
@@ -1339,8 +1388,8 @@ menu_install() {
     echo "2. 安装本机 CLI（install-self）"
     echo ""
     echo "【更新】"
-    echo "3. 更新 CLI 脚本与模块"
-    echo "4. 更新 CLI + Caddy 二进制"
+    echo "3. 更新 CLI（跟随本机 DEFAULT_REF）"
+    echo "4. 更新到 main 最新 + 二进制"
     echo ""
     echo "0. 返回上一级"
     echo "======================"
@@ -1454,7 +1503,7 @@ interactive_install_menu() {
             1) with_global_lock cmd_install ;;
             2) with_global_lock cmd_install_self ;;
             3) with_global_lock cmd_update ;;
-            4) with_global_lock cmd_update --binary ;;
+            4) with_global_lock cmd_update --ref main --binary ;;
             0) return 0 ;;
             *) fail "无效输入" ;;
         esac
