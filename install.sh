@@ -56,6 +56,19 @@ require_command() {
     command -v "$cmd" >/dev/null 2>&1 || die "Missing command: $cmd"
 }
 
+# Portable download: prefers curl, falls back to wget (BusyBox compatible)
+safe_download() {
+    local url="$1"
+    local output="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 --max-time 120 "$url" -o "$output"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 120 -O "$output" "$url"
+    else
+        die "Neither curl nor wget available; install one to continue"
+    fi
+}
+
 verify_checksum() {
     local file="$1"
     local name="$2"
@@ -68,7 +81,7 @@ verify_checksum() {
 
     require_command sha256sum
     sums="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$CHECKSUMS_URL" -o "$sums" || {
+    safe_download "$CHECKSUMS_URL" "$sums" || {
         rm -f "$sums"
         die "Failed to download checksums: $CHECKSUMS_URL"
     }
@@ -170,13 +183,13 @@ install_cli() {
     trap 'rm -f "$tmp_lib" "$tmp_cli"' RETURN
 
     tmp_lib="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$LIB_URL" -o "$tmp_lib"
+    safe_download "$LIB_URL" "$tmp_lib"
     [[ -s "$tmp_lib" ]] || die "Downloaded library script is empty: $LIB_URL"
     verify_checksum "$tmp_lib" "caddy-lib.sh"
     bash -n "$tmp_lib"
 
     tmp_cli="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 "$CLI_URL" -o "$tmp_cli"
+    safe_download "$CLI_URL" "$tmp_cli"
     [[ -s "$tmp_cli" ]] || die "Downloaded CLI script is empty: $CLI_URL"
     verify_checksum "$tmp_cli" "caddy.sh"
     bash -n "$tmp_cli"

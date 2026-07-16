@@ -2075,6 +2075,12 @@ build_emby_site_block() {
 
     cat <<EMBYEOF
 ${site_label} {
+EMBYEOF
+    # Keep Emby free of encode/gzip, but still honor CF DNS-01 TLS hook on HTTPS.
+    if [[ "$scheme" != "http" ]]; then
+        _hook_render_site_tls
+    fi
+    cat <<EMBYEOF
     reverse_proxy ${target_domain} {
         header_up Host {upstream_hostport}
     }
@@ -2255,6 +2261,11 @@ BLOCK
 # 生成: $(date '+%F %T')
 
 ${scheme}://${label} {
+BLOCK
+    if [[ "$scheme" != "http" ]]; then
+        _hook_render_site_tls
+    fi
+    cat <<BLOCK
     request_body {
         max_size 500MB
     }
@@ -4618,13 +4629,22 @@ interactive_menu() {
 }
 
 main() {
+    local cmd="${1:-}"
+
+    # Read-only help should not require root or mutate /etc.
+    case "$cmd" in
+        help|-h|--help)
+            cmd_show_help
+            return 0
+            ;;
+    esac
+
     require_root
 
     ensure_dirs
     load_state
     fix_permissions
 
-    local cmd="${1:-}"
     case "$cmd" in
         install) with_global_lock cmd_install ;;
         install-self|self-install) with_global_lock cmd_install_self ;;

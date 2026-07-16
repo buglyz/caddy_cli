@@ -29,7 +29,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-clo
 安装完成后直接运行：
 ```bash
 sudo c          # 交互菜单
-sudo c help     # 命令行模式
+c help          # 只读帮助（无需 root）
+sudo c doctor   # 环境诊断
 ```
 
 ## 常用命令
@@ -107,6 +108,7 @@ c update
 - 配置重载失败时自动降级 `restart`（兼容老 systemd）
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
+- Cloudflare 版的 per-site DNS-01 hook 覆盖普通反代、静态站、Emby 与网关（HTTP 模式仍跳过 tls 块）
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
 - 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http://<host>/path` 和 `/https://<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
 

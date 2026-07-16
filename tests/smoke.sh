@@ -152,6 +152,35 @@ test_gateway_uses_full_url_proxy_paths() {
     ! grep -Fq 'https://gate.example.com/https/emby.example.com' <<<"$config" || fail_test "gateway emitted legacy /https/source path"
 }
 
+
+test_emby_and_gateway_emit_tls_hook_on_https() {
+    _hook_render_site_tls() {
+        cat <<'EOF'
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+EOF
+    }
+
+    local config
+    config="$(build_emby_site_block emby.example.com https://upstream.example.com:443 https)"
+    grep -Fq 'tls {' <<<"$config" || fail_test "emby HTTPS site missing TLS hook"
+    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "emby HTTPS site missing cloudflare tls directive"
+    ! grep -Fq 'encode zstd gzip' <<<"$config" || fail_test "emby site unexpectedly emitted encode"
+
+    config="$(build_emby_site_block emby.example.com http://upstream.example.com:8096 http)"
+    ! grep -Fq 'tls {' <<<"$config" || fail_test "emby HTTP site unexpectedly emitted TLS hook"
+
+    config="$(build_gateway_site_block gate.example.com https "x" "emby.example.com:443")"
+    grep -Fq 'tls {' <<<"$config" || fail_test "gateway HTTPS site missing TLS hook"
+    grep -Fq 'request_body' <<<"$config" || fail_test "gateway HTTPS site missing request_body"
+
+    config="$(build_gateway_site_block gate.example.com http "x" "emby.example.com:443")"
+    ! grep -Fq 'tls {' <<<"$config" || fail_test "gateway HTTP site unexpectedly emitted TLS hook"
+
+    _hook_render_site_tls() { :; }
+}
+
 test_add_emby_propagates_apply_failure
 test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
@@ -160,5 +189,6 @@ test_add_static_supports_http_mode
 test_reverse_proxy_builders_support_http_mode
 test_http_multi_label_matching_is_scheme_aware
 test_gateway_uses_full_url_proxy_paths
+test_emby_and_gateway_emit_tls_hook_on_https
 
 printf 'ok - smoke tests passed\n'
