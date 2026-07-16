@@ -43,7 +43,7 @@ _CADDYCTL_LIBDIR="$(_caddyctl_resolve_libdir)" || {
 }
 
 # Module load order is fixed; filenames are also checksum keys (lib/<name>).
-_CADDYCTL_MODULES=(
+declare -a _CADDYCTL_MODULES=(
     00-core.sh
     10-validate.sh
     20-config.sh

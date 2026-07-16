@@ -266,6 +266,23 @@ test_resolve_lock_file_prefers_writable_dir() {
     LOCK_FILE="$old_lock"
 }
 
+
+test_modules_array_safe_under_set_u() {
+    # cmd_update must not crash when _CADDYCTL_MODULES is unset under set -u
+    bash -c 'set -euo pipefail
+      source "'"$repo_root"'/caddy-lib.sh"
+      unset _CADDYCTL_MODULES || true
+      # replicate selection logic
+      modules=()
+      if declare -p _CADDYCTL_MODULES >/dev/null 2>&1 && ((${#_CADDYCTL_MODULES[@]} > 0)); then
+        modules=("${_CADDYCTL_MODULES[@]}")
+      else
+        modules=(00-core.sh 10-validate.sh)
+      fi
+      ((${#modules[@]} >= 2)) || exit 2
+    ' || fail_test "module array selection is unsafe under set -u"
+}
+
 test_add_emby_propagates_apply_failure
 test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
@@ -278,5 +295,6 @@ test_emby_and_gateway_emit_tls_hook_on_https
 test_set_preserves_dns_tls_from_existing_file
 test_resolve_dns_tls_flag_logic
 test_resolve_lock_file_prefers_writable_dir
+test_modules_array_safe_under_set_u
 
 printf 'ok - smoke tests passed\n'

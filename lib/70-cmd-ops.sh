@@ -485,8 +485,8 @@ cmd_install_self() {
             done
         fi
     fi
-    if (( mod_count == 0 )); then
-        fail "未找到任何库模块（期望 $_CADDYCTL_LIBDIR 或 $(dirname "$lib_src")/lib）。请从完整仓库安装。"
+    if (( mod_count == 0 )) || [[ ! -f "$lib_mod_dir/00-core.sh" ]]; then
+        fail "库模块安装不完整（期望 $_CADDYCTL_LIBDIR 或 $(dirname "$lib_src")/lib 中含 00-core.sh）。请从完整仓库安装。"
         return 1
     fi
 
@@ -506,7 +506,8 @@ cmd_update() {
 
     local url lib_url checksums_url base_url tmp tmp_lib target_bin target_alias lib_bin lib_mod_dir
     local -a modules=()
-    if ((${#_CADDYCTL_MODULES[@]} > 0)); then
+    # Under 'set -u', ${#_CADDYCTL_MODULES[@]} aborts if the array is unset.
+    if declare -p _CADDYCTL_MODULES >/dev/null 2>&1 && ((${#_CADDYCTL_MODULES[@]} > 0)); then
         modules=("${_CADDYCTL_MODULES[@]}")
     else
         modules=(
@@ -538,6 +539,8 @@ cmd_update() {
     cleanup_update_temps() {
         cleanup_paths "${tmp:-}" "${tmp_lib:-}" "${tmp_mods[@]}"
     }
+    # Ensure temps are removed even if update aborts unexpectedly.
+    trap 'cleanup_update_temps' RETURN
 
     # 1) 下载并校验前端脚本
     tmp="$(mktemp)"
@@ -623,7 +626,14 @@ cmd_update() {
         install -m 0644 "${tmp_mods[$i]}" "$lib_mod_dir/$mod"
         i=$((i + 1))
     done
+    if [[ ! -f "$lib_mod_dir/00-core.sh" ]]; then
+        cleanup_update_temps
+        trap - RETURN
+        fail "更新后缺少 $lib_mod_dir/00-core.sh，已中止（未清理旧入口，请重试）。"
+        return 1
+    fi
     cleanup_update_temps
+    trap - RETURN
 
     say "更新完成:"
     say "  $target_bin"
@@ -733,7 +743,7 @@ Emby 管理:
   c add-gateway <域名> --allow <host:port[,host:port...]> [--http|--https] [--dns-only] [--skip-dns-check]
   c add-gateway <域名> --unsafe-open-proxy [--http|--https] [--dns-only] [--skip-dns-check]
   c set-emby <Emby域名> [--target <地址>] [--http|--https] [--dns-only]
-  c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https]
+  c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https] [--dns-only]
   c rm-emby <Emby域名或网关域名>
 
 添加域名反代时会检查域名 A/AAAA 是否解析到本机 IP。
