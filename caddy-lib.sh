@@ -20,6 +20,7 @@ DEFAULT_SYSTEMCTL_TIMEOUT="30"
 MIN_SYSTEMCTL_TIMEOUT="1"
 MAX_SYSTEMCTL_TIMEOUT="600"
 DEFAULT_LOCK_WAIT_SECONDS="30"
+LOCK_FILE_CANDIDATES=("/run/lock/caddyctl.lock" "/var/lock/caddyctl.lock" "/tmp/caddyctl.lock")
 LOCK_FILE="/run/lock/caddyctl.lock"
 LOCK_HELD=0
 # shellcheck disable=SC2034 # reserved defaults for generated Caddy access-log roll policy
@@ -1148,6 +1149,23 @@ report_conflicting_service_state() {
 }
 
 
+resolve_lock_file() {
+    local candidate dir probe
+    for candidate in "${LOCK_FILE_CANDIDATES[@]}"; do
+        dir="$(dirname "$candidate")"
+        if mkdir -p "$dir" 2>/dev/null; then
+            probe="$dir/.caddyctl-lock-write-test.$$"
+            if ( : >"$probe" ) 2>/dev/null; then
+                rm -f "$probe" 2>/dev/null || true
+                LOCK_FILE="$candidate"
+                return 0
+            fi
+        fi
+    done
+    LOCK_FILE="/tmp/caddyctl.lock"
+    mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
+}
+
 acquire_flock() {
     local fd="$1"
     local wait_seconds="$2"
@@ -1187,7 +1205,8 @@ with_global_lock() {
         return 1
     fi
 
-    mkdir -p "$(dirname "$LOCK_FILE")"
+    resolve_lock_file
+    mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
     exec {fd}> "$LOCK_FILE"
     if ! acquire_flock "$fd" "$wait_seconds"; then
         fail "获取全局操作锁超时（${wait_seconds}s），请稍后重试。"
@@ -4631,10 +4650,36 @@ interactive_menu() {
 main() {
     local cmd="${1:-}"
 
-    # Read-only help should not require root or mutate /etc.
+    # Pure help never needs root or /etc side effects.
     case "$cmd" in
         help|-h|--help)
             cmd_show_help
+            return 0
+            ;;
+    esac
+
+    # Read-only commands: allow non-root best-effort inspection.
+    case "$cmd" in
+        list|ls|list-emby|emby-list|status|logs|snapshots|snapshot|config|cat|validate|check|doctor|check-env|cert-check)
+            if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+                ensure_dirs
+                load_state
+            else
+                if [[ -r "$STATE_FILE" ]]; then
+                    load_state
+                fi
+            fi
+            case "$cmd" in
+                list|ls) cmd_list ;;
+                list-emby|emby-list) shift; cmd_list_emby "$@" ;;
+                status) cmd_status ;;
+                logs) cmd_logs ;;
+                snapshots|snapshot) shift; cmd_snapshots "${1:-20}" ;;
+                config|cat) cmd_config ;;
+                validate|check) require_command caddy; cmd_validate ;;
+                doctor|check-env) cmd_doctor ;;
+                cert-check) shift; cmd_cert_check "${1:-}" ;;
+            esac
             return 0
             ;;
     esac
@@ -4649,12 +4694,10 @@ main() {
         install) with_global_lock cmd_install ;;
         install-self|self-install) with_global_lock cmd_install_self ;;
         update) with_global_lock cmd_update ;;
-        doctor|check-env) cmd_doctor ;;
         add) shift; require_command caddy; with_global_lock run_mutation add cmd_add "$@" ;;
         add-static|static) shift; require_command caddy; with_global_lock run_mutation add-static cmd_add_static "$@" ;;
         add-emby|emby) shift; require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby "$@" ;;
         add-gateway|gateway) shift; require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway "$@" ;;
-        list-emby|emby-list) shift; cmd_list_emby "$@" ;;
         set-emby) shift; require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby_site "$@" ;;
         set-gateway) shift; require_command caddy; with_global_lock run_mutation set-gateway cmd_set_gateway "$@" ;;
         rm-emby|del-emby|delete-emby) shift; require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby "$@" ;;
@@ -4662,25 +4705,23 @@ main() {
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
         enable) shift; require_command caddy; with_global_lock run_mutation enable cmd_enable "${1:-}" ;;
         disable) shift; require_command caddy; with_global_lock run_mutation disable cmd_disable "${1:-}" ;;
-        list|ls) cmd_list ;;
         email) shift; require_command caddy; with_global_lock run_mutation email cmd_email "${1:-}" ;;
         timeout) shift; with_global_lock run_mutation timeout cmd_timeout "${1:-}" ;;
         upstream-mode) shift; with_global_lock run_mutation upstream-mode cmd_upstream_mode "${1:-}" ;;
         import) shift; require_command caddy; with_global_lock run_mutation import cmd_import "${1:-}" ;;
-        snapshots|snapshot) shift; cmd_snapshots "${1:-20}" ;;
         apply|reload) require_command caddy; with_global_lock run_mutation apply cmd_apply ;;
-        validate|check) require_command caddy; cmd_validate ;;
-        cert-check) shift; cmd_cert_check "${1:-}" ;;
         undo) shift; require_command caddy; with_global_lock cmd_undo "${1:-latest}" ;;
-        status) cmd_status ;;
-        logs) cmd_logs ;;
-        config|cat) cmd_config ;;
         start) with_global_lock cmd_start ;;
         restart) with_global_lock cmd_restart ;;
         stop) with_global_lock cmd_stop ;;
-        help|-h|--help) cmd_show_help ;;
         ""|menu) interactive_menu ;;
-        *) _hook_cli_command "$@" && exit 0 ;&
-        *) fail "未知命令: $cmd"; cmd_show_help; exit 1 ;;
+        *)
+            if _hook_cli_command "$@"; then
+                exit 0
+            fi
+            fail "未知命令: $cmd"
+            cmd_show_help
+            exit 1
+            ;;
     esac
 }

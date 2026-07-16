@@ -2,31 +2,276 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  shell:
+  shellcheck:
+    name: Bash syntax and ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install ShellCheck
+      - name: Install ShellCheck and Caddy
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y shellcheck caddy
 
-      - name: Check Bash syntax
+      - name: Bash syntax check
         run: |
-          bash -n *.sh caddy-cloudflare tests/smoke.sh
+          set -euo pipefail
+          scripts=(
+            caddy-lib.sh
+            caddy.sh
+            caddy-cloudflare.sh
+            install.sh
+            install-cloudflare.sh
+            caddy-cloudflare
+            tests/smoke.sh
+          )
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
 
-      - name: Run ShellCheck
+      - name: Check checksums
         run: |
-          shellcheck -x caddy-lib.sh caddy.sh caddy-cloudflare caddy-cloudflare.sh install.sh install-cloudflare.sh tests/smoke.sh
+          set -euo pipefail
+          # Prebuilt caddy binary is release-only; verify only files present in the tree.
+          while read -r hash name; do
+            [[ -n "${name:-}" ]] || continue
+            if [[ -f "$name" ]]; then
+              echo "$hash  $name" | sha256sum -c -
+            else
+              echo "skip missing release-only asset: $name"
+            fi
+          done < checksums.txt
 
-      - name: Run smoke tests
+      - name: Generated Caddyfile smoke tests
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          bash -c 'source ./caddy-lib.sh; build_gateway_site_block gate.example.com https "$(gateway_allow_regex "emby.example.com:443,10.0.0.5:8096")" "emby.example.com:443,10.0.0.5:8096"' > "$tmp"
+          caddy validate --config "$tmp" --adapter caddyfile
+          grep -Fq 'header_up X-Real-IP {remote_host}' "$tmp"
+          grep -Fq 'header_up Host emby.example.com' "$tmp"
+          grep -Fq 'header_down Location ^https://([^/]+)(/.*)$ https://gate.example.com/https://$1$2' "$tmp"
+          grep -Fq 'path_regexp up_https_default_port_0 ^/https:/*emby\.example\.com(/.*)' "$tmp"
+          ! grep -Fq 'https://gate.example.com/https/emby.example.com' "$tmp"
+
+          bash -c 'source ./caddy-lib.sh; build_gateway_site_block gate.example.com https "" ""' > "$tmp"
+          caddy validate --config "$tmp" --adapter caddyfile
+          grep -Fq 'to {re.up_http_host.1}:80' "$tmp"
+          grep -Fq 'to {re.up_https_host.1}:443' "$tmp"
+
+          bash -c 'source ./caddy-lib.sh; build_static_site_block static.example.com "/var/www/site with spaces" on' > "$tmp"
+          caddy validate --config "$tmp" --adapter caddyfile
+
+      - name: Doctor parser smoke tests
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          nginxdir="$(mktemp -d)"
+          trap 'rm -f "$tmp"; rm -rf "$nginxdir"' EXIT
+          bash -s "$tmp" "$nginxdir" <<'BASH'
+          set -euo pipefail
+          caddyfile="$1"
+          nginxdir="$2"
+          source ./caddy-lib.sh
+
+          cat > "$caddyfile" <<'EOF'
+          a.example.com, https://b.example.com {
+              reverse_proxy {
+                  to 127.0.0.1:1111 localhost:2222
+                  transport http
+              }
+          }
+
+          http://c.example.com {
+              reverse_proxy @api http://127.0.0.1:3333 {
+                  header_up Host {upstream_hostport}
+              }
+          }
+
+          :8080 {
+              respond "ok"
+          }
+
+          (snippet) {
+              encode gzip
+          }
+          EOF
+
+          cat > "$nginxdir/sites.conf" <<'EOF'
+          server {
+              server_name a.example.com b.example.com;
+              proxy_ssl_server_name on;
+          }
+          server {
+              server_name c.example.com _;
+          }
+          EOF
+
+          targets="$(extract_reverse_proxy_targets "$caddyfile" | sort | tr '\n' ' ')"
+          [[ "$targets" == *"127.0.0.1:1111"* ]]
+          [[ "$targets" == *"localhost:2222"* ]]
+          [[ "$targets" == *"http://127.0.0.1:3333"* ]]
+          [[ "$targets" != *"@api"* ]]
+
+          labels="$(extract_caddy_site_labels "$caddyfile" | while IFS= read -r label; do normalize_site_name "$label" 2>/dev/null || true; done | sort | tr '\n' ' ')"
+          [[ "$labels" == *"a.example.com"* ]]
+          [[ "$labels" == *"b.example.com"* ]]
+          [[ "$labels" == *"c.example.com"* ]]
+          [[ "$labels" != *":8080"* ]]
+
+          nginx_names="$(extract_nginx_server_names "$nginxdir" | while IFS= read -r label; do normalize_site_name "$label" 2>/dev/null || true; done | sort | tr '\n' ' ')"
+          [[ "$nginx_names" == *"a.example.com"* ]]
+          [[ "$nginx_names" == *"b.example.com"* ]]
+          [[ "$nginx_names" == *"c.example.com"* ]]
+          [[ "$nginx_names" != *"proxy_ssl_server_name"* ]]
+
+          coverage="$(report_nginx_migration_coverage "$nginxdir" "$caddyfile")"
+          grep -Fq '[OK] nginx server_name 已全部出现在 Caddyfile（3 个）' <<<"$coverage"
+          BASH
+
+      - name: Site state smoke tests
+        run: |
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          bash -s "$tmpdir" <<'BASH'
+          set -euo pipefail
+          root="$1"
+          source ./caddy-lib.sh
+          SITES_DIR="$root/sites.d"
+          GLOBALS_DIR="$root/globals.d"
+          BACKUP_DIR="$root/backup"
+          STATE_FILE="$root/caddyctl.conf"
+          ACCESS_LOG_DIR="$root/log"
+          mkdir -p "$SITES_DIR" "$GLOBALS_DIR" "$BACKUP_DIR" "$ACCESS_LOG_DIR"
+          : > "$STATE_FILE"
+          apply_config() { return 0; }
+          fix_permissions() { :; }
+
+          cat > "$SITES_DIR/example.com.conf" <<'EOF'
+          example.com {
+              respond "enabled"
+          }
+          EOF
+          cat > "$SITES_DIR/example.com.conf.disabled" <<'EOF'
+          example.com {
+              respond "disabled"
+          }
+          EOF
+
+          if cmd_disable example.com; then
+              echo "cmd_disable unexpectedly overwrote an existing disabled site" >&2
+              exit 1
+          fi
+          grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
+          grep -q 'respond "disabled"' "$SITES_DIR/example.com.conf.disabled"
+
+          caddy() { return 0; }
+          cmd_import "$SITES_DIR/example.com.conf"
+          grep -q 'respond "enabled"' "$SITES_DIR/example.com.conf"
+
+          cat > "$SITES_DIR/emby.example.com.conf" <<'EOF'
+          emby.example.com {
+              reverse_proxy https://10.0.0.5:8096 {
+                  header_up Host {upstream_hostport}
+              }
+          }
+          EOF
+          cmd_set emby.example.com --http
+          grep -q '^http://emby.example.com {' "$SITES_DIR/emby.example.com.conf"
+          grep -q 'reverse_proxy https://10.0.0.5:8096' "$SITES_DIR/emby.example.com.conf"
+
+          cat > "$SITES_DIR/gate.example.com.conf" <<'EOF'
+          # Emby 通用反代网关 — gate.example.com
+          # 用法: https://gate.example.com/https://<上游主机:端口>/路径
+          # 上游限制: 仅允许: emby.example.com:443
+          # 生成: 2026-01-01 00:00:00
+
+          https://gate.example.com {
+              request_body {
+                  max_size 500MB
+              }
+          }
+          EOF
+          cmd_set_gateway gate.example.com --allow 10.0.0.6:8096 --https
+          grep -q '仅允许: 10.0.0.6:8096' "$SITES_DIR/gate.example.com.conf"
+          grep -q '^https://gate.example.com {' "$SITES_DIR/gate.example.com.conf"
+          if cmd_set_gateway gate.example.com --allow 10.0.0.6:8096 --unsafe-open-proxy >/tmp/gateway_conflict1.out 2>/tmp/gateway_conflict1.err; then
+              echo "set-gateway should reject --allow followed by --unsafe-open-proxy" >&2
+              exit 1
+          fi
+          grep -q -- '--allow 与 --unsafe-open-proxy 不能同时使用' /tmp/gateway_conflict1.err
+          if cmd_set_gateway gate.example.com --unsafe-open-proxy --allow 10.0.0.6:8096 >/tmp/gateway_conflict2.out 2>/tmp/gateway_conflict2.err; then
+              echo "set-gateway should reject --unsafe-open-proxy followed by --allow" >&2
+              exit 1
+          fi
+          grep -q -- '--allow 与 --unsafe-open-proxy 不能同时使用' /tmp/gateway_conflict2.err
+          if cmd_set gate.example.com >/tmp/gateway_set.out 2>/tmp/gateway_set.err; then
+              echo "cmd_set should reject gateway configs with a dedicated hint" >&2
+              exit 1
+          fi
+          grep -q 'c set-gateway gate.example.com' /tmp/gateway_set.err
+
+          local_ip_addresses() { printf '%s\n' 203.0.113.10; }
+          public_ip_addresses() { :; }
+          resolve_domain_addresses() { printf '%s\n' 198.51.100.20; }
+          if cmd_add blocked.example.com 3000 >/tmp/cmd_add_blocked.out 2>/tmp/cmd_add_blocked.err; then
+              echo "cmd_add should have failed on DNS mismatch" >&2
+              exit 1
+          fi
+          grep -q '域名未解析到本机' /tmp/cmd_add_blocked.err
+
+          resolve_domain_addresses() { printf '%s\n' 203.0.113.10; }
+          cmd_add ok.example.com 3000 --skip-dns-check
+          test -s "$SITES_DIR/ok.example.com.conf"
+
+          resolve_domain_addresses() { printf '%s\n' 198.51.100.20; }
+          if cmd_add_static blocked-static.example.com /var/www/static --spa >/tmp/cmd_static_blocked.out 2>/tmp/cmd_static_blocked.err; then
+              echo "cmd_add_static should have failed on DNS mismatch" >&2
+              exit 1
+          fi
+          grep -q '域名未解析到本机' /tmp/cmd_static_blocked.err
+
+          cmd_add_static ok-static.example.com /var/www/static --spa --skip-dns-check
+          test -s "$SITES_DIR/ok-static.example.com.conf"
+          BASH
+
+          bash -s <<'BASH'
+          set -euo pipefail
+          source ./caddy-lib.sh
+          validate_domain example.com
+          ! validate_domain example..com
+          ! validate_domain -bad.example.com
+          ! validate_domain bad-.example.com
+          validate_site_label 'example.com,www.example.com'
+          ! validate_site_label 'example.com; respond hacked'
+          ! validate_site_label 'example.com # comment'
+          validate_path_prefix /api
+          ! validate_path_prefix '/api { respond hacked }'
+          ! validate_path_prefix '/api # comment'
+          test "$(normalize_ip_address 2001:0db8:0000:0000:0000:ff00:0042:8329)" = "2001:db8::ff00:42:8329"
+          ! looks_like_ip_address 8.8.8.8:53
+          BASH
+
+      - name: Unit smoke tests
         run: |
           tests/smoke.sh
 
-      - name: Verify checksums
+      - name: ShellCheck
         run: |
-          sha256sum -c checksums.txt
+          shellcheck -x \
+            caddy-lib.sh \
+            caddy.sh \
+            caddy-cloudflare.sh \
+            install.sh \
+            install-cloudflare.sh \
+            caddy-cloudflare \
+            tests/smoke.sh

@@ -181,6 +181,22 @@ EOF
     _hook_render_site_tls() { :; }
 }
 
+
+test_resolve_lock_file_prefers_writable_dir() {
+    local old_candidates=("${LOCK_FILE_CANDIDATES[@]}")
+    local old_lock="$LOCK_FILE"
+    local base="$tmpdir/locks"
+    mkdir -p "$base/ok"
+    # A regular file cannot host a lock subdirectory — mkdir -p should fail.
+    : >"$base/notdir"
+    LOCK_FILE_CANDIDATES=("$base/notdir/caddyctl.lock" "$base/ok/caddyctl.lock")
+    resolve_lock_file
+    [[ "$LOCK_FILE" == "$base/ok/caddyctl.lock" ]] \
+        || fail_test "resolve_lock_file did not pick writable path: $LOCK_FILE"
+    LOCK_FILE_CANDIDATES=("${old_candidates[@]}")
+    LOCK_FILE="$old_lock"
+}
+
 test_add_emby_propagates_apply_failure
 test_add_gateway_propagates_apply_failure
 test_set_emby_restores_previous_file_on_apply_failure
@@ -190,5 +206,6 @@ test_reverse_proxy_builders_support_http_mode
 test_http_multi_label_matching_is_scheme_aware
 test_gateway_uses_full_url_proxy_paths
 test_emby_and_gateway_emit_tls_hook_on_https
+test_resolve_lock_file_prefers_writable_dir
 
 printf 'ok - smoke tests passed\n'

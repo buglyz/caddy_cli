@@ -62,17 +62,17 @@ _hook_fix_permissions() {
 }
 
 _hook_render_global_options() {
-    if cloudflare_dns_ready; then
-        echo "    dns cloudflare {env.CLOUDFLARE_API_TOKEN}"
-    fi
+    # Intentionally empty: a global "dns cloudflare" block steers ACME toward
+    # DNS-01 for every site. Keep HTTP-01/TLS-ALPN-01 as the default path.
+    # Opt into DNS-01 per site with: c add <domain> <port> --dns-only
+    :
 }
 
 _hook_render_site_tls() {
-    # When Cloudflare DNS is configured, force DNS-01 challenge per site.
-    # Without this block, Caddy still prefers tls-alpn-01 / http-01 which
-    # often fail on servers behind NAT or firewalled ISPs.
-    # --dns-only flag bypasses cloudflare_env_configured check.
-    if [[ "${FORCE_DNS_TLS:-0}" == "1" ]] || cloudflare_env_configured; then
+    # Default: no per-site tls block → Caddy uses HTTP-01 / TLS-ALPN-01.
+    # Explicit DNS-01 only when the operator passes --dns-only (FORCE_DNS_TLS=1).
+    # Avoid forcing DNS-01 on every site merely because cloudflare.env exists.
+    if [[ "${FORCE_DNS_TLS:-0}" == "1" ]]; then
         cat <<'EOF'
     tls {
         dns cloudflare {env.CLOUDFLARE_API_TOKEN}

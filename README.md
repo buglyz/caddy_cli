@@ -92,7 +92,8 @@ c update
 
 ## Cloudflare DNS 版额外功能
 
-- 自动通过 DNS-01 challenge 申请 Let's Encrypt 证书（支持泛域名 `*.example.com`）
+- 配置 Cloudflare API token 后，默认仍走 **HTTP-01 / TLS-ALPN-01**（不会因为存在 token 就全局强制 DNS-01）
+- 需要 DNS-01（泛域名、CF 橙云、80/443 不可达）时显式加：`c add example.com 3000 --dns-only`
 - `c cloudflare set` — 配置 Cloudflare API token（交互式隐藏输入；脚本环境可通过 stdin 传入）
 - `c cloudflare check` — 检查 Cloudflare DNS-01 就绪状态
 - `c cloudflare remove` — 删除 Cloudflare 配置
@@ -108,14 +109,14 @@ c update
 - 配置重载失败时自动降级 `restart`（兼容老 systemd）
 - `c update` 同时更新前端脚本和共享库
 - Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
-- Cloudflare 版的 per-site DNS-01 hook 覆盖普通反代、静态站、Emby 与网关（HTTP 模式仍跳过 tls 块）
+- Cloudflare 版支持 per-site DNS-01（`--dns-only`）；默认 HTTP-01，覆盖普通反代、静态站、Emby 与网关
 - 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
 - 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http://<host>/path` 和 `/https://<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
 
 ## 供应链与安全
 
 - 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r9`，并校验同 tag 下的 `checksums.txt`。
-- Cloudflare 版会优先下载 GitHub Release 里的预编译 `caddy` 资产；若资产不可用，会回退到同 tag 的仓库文件和 jsDelivr CDN，并继续执行 checksum 校验。
+- Cloudflare 版预编译 `caddy` **仅通过 GitHub Release 分发**（仓库不再追踪 46MB 二进制）；安装脚本下载 Release 资产并校验 checksum，不可用时用 `--build-from-source`。
 - `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
 - Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
 - 本地共享库缺失时，CLI 默认不再在线 `source` 远程代码；临时救急可设置 `CADDYCTL_ALLOW_REMOTE_LIB=1`。
@@ -156,7 +157,7 @@ c cert-check your-domain.com
 
 ## 注意事项
 
-- 需要 `root/sudo` 运行
+- 写操作需要 `root/sudo`；`help` / `list` / `doctor` / `status` / `logs` / `validate` 等只读命令可非 root 尽力执行
 - 如果系统没有 service manager（systemd / OpenRC），脚本只写配置，不会自动重载服务
 - Cloudflare DNS 版需要先运行 `c cloudflare set` 配置 API token
 - **不要手动编辑 `/etc/caddy/Caddyfile`**，它由脚本从 `sites.d/` 和 `globals.d/` 自动生成

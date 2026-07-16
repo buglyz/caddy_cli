@@ -187,20 +187,17 @@ prebuilt_caddy_supported() {
 download_caddy_from_repo() {
     local step_label="${1:-}"
     if [[ -n "$step_label" ]]; then
-        log "[${step_label}] Downloading pre-built Caddy from repo..."
+        log "[${step_label}] Downloading pre-built Caddy from GitHub Release..."
     else
-        log "Downloading pre-built Caddy from repo..."
+        log "Downloading pre-built Caddy from GitHub Release..."
     fi
     local tmp
     tmp="$(mktemp)"
 
+    # Binary ships only via GitHub Releases (not the git tree) to keep the repo lean.
     if ! safe_download "$CADDY_RELEASE_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
-        log "Release asset unavailable, trying repository raw file..."
-        if ! safe_download "$CADDY_RAW_URL" "$tmp" 2>/dev/null || [[ ! -s "$tmp" ]]; then
-            log "GitHub raw slow, trying jsDelivr CDN..."
-            safe_download "https://cdn.jsdelivr.net/gh/buglyz/caddy_cli@${CADDY_CLI_REF}/caddy" "$tmp" \
-                || die "Download failed: $CADDY_RAW_URL"
-        fi
+        rm -f "$tmp"
+        die "Release asset unavailable: $CADDY_RELEASE_URL (use --build-from-source, or set CADDY_RELEASE_URL)"
     fi
 
     [[ -s "$tmp" ]] || die "Downloaded Caddy binary is empty"
