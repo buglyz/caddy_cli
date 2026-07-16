@@ -785,6 +785,46 @@ PY
     rm -f "$tmp_block" "$tmp_extras"
 }
 
+
+# Keep only safe custom directives for complex templates (emby/gateway).
+# Full extract is used for reverse/path/static; whitelist avoids matcher leakage.
+filter_whitelist_site_extras() {
+    local extras="$1"
+    [[ -n "$extras" ]] || return 0
+    if command_exists python3; then
+        EXTRAS_TEXT="$extras" python3 <<'PY'
+import os
+import re
+text = os.environ.get("EXTRAS_TEXT", "")
+lines = text.splitlines()
+# allow: header..., basic_auth/basicauth blocks, log blocks, encode is template skip
+allow_start = re.compile(r"^\s*(header\b|basic_auth\b|basicauth\b|log\b)")
+i = 0
+out = []
+while i < len(lines):
+    line = lines[i]
+    if not allow_start.match(line):
+        i += 1
+        continue
+    if line.count("{") > line.count("}"):
+        d = line.count("{") - line.count("}")
+        out.append(line)
+        i += 1
+        while i < len(lines) and d > 0:
+            out.append(lines[i])
+            d += lines[i].count("{") - lines[i].count("}")
+            i += 1
+        continue
+    out.append(line)
+    i += 1
+print("\n".join(out))
+PY
+        return 0
+    fi
+    # fallback: only single-line header
+    printf '%s\n' "$extras" | awk '/^[[:space:]]*header[[:space:]]/ {print}'
+}
+
 emit_site_common_blocks() {
     local emit_tls="${1:-yes}"
     cat <<'EOF'

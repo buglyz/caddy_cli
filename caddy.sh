@@ -3,7 +3,7 @@
 # 用法: sudo c <subcommand>
 
 # shellcheck disable=SC2034 # consumed by sourced caddy-lib.sh cmd_update
-DEFAULT_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r12}"
+DEFAULT_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r13}"
 DEFAULT_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${DEFAULT_REF}}"
 DEFAULT_UPDATE_URL="${DEFAULT_BASE_URL}/caddy.sh"
 

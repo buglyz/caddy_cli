@@ -268,7 +268,7 @@ jobs:
 
       - name: Functional suite
         run: |
-          tests/functional.sh
+          bash tests/functional.sh
 
       - name: ShellCheck
         run: |

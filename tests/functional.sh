@@ -657,6 +657,77 @@ opens=$(grep -o '{' "$f" | wc -l)
 closes=$(grep -o '}' "$f" | wc -l)
 [[ "$opens" == "$closes" ]] && tpass "preserve brace balance" || tfail "preserve brace balance"
 
+
+# ─────────────────────────────────────────────
+section "15) set-static / fuzzy / import-merge / whitelist"
+# ─────────────────────────────────────────────
+assert_ok "add static for set" cmd_add_static staticset.example.com /var/www/a --skip-dns-check
+assert_ok "set-static root" cmd_set_static staticset.example.com --root /var/www/b
+f="$(find_site_file staticset.example.com)"
+assert_file_has "$f" "/var/www/b" "set-static root path"
+assert_ok "set via generic for static spa" cmd_set staticset.example.com --spa --root /var/www/c
+f="$(find_site_file staticset.example.com)"
+assert_file_has "$f" "/var/www/c" "set static root via cmd_set"
+assert_file_has "$f" "try_files" "set static spa"
+
+# single fuzzy non-tty auto
+assert_ok "add fuzzy target" cmd_add fuzzy-unique.example.com 19100 --skip-dns-check
+# query substring that only appears once
+if f="$(find_site_file fuzzy-unique 2>/dev/null)"; then
+    tpass "fuzzy non-tty single auto-accept"
+else
+    tfail "fuzzy non-tty single auto-accept"
+fi
+
+# import merge keeps existing
+rm -f "$SITES_DIR"/*.conf 2>/dev/null || true
+assert_ok "seed merge keep" cmd_add keepmerge.example.com 19200 --skip-dns-check
+cat >"$tmpdir/merge-src.Caddyfile" <<'EOF'
+{
+    email merge@example.org
+}
+merged.example.com {
+    reverse_proxy 127.0.0.1:19201
+}
+EOF
+assert_ok "import merge" cmd_import --merge "$tmpdir/merge-src.Caddyfile"
+if find_site_file keepmerge.example.com >/dev/null 2>&1; then
+    tpass "merge kept existing site"
+else
+    tfail "merge kept existing site"
+fi
+if find_site_file merged.example.com >/dev/null 2>&1; then
+    tpass "merge added new site"
+else
+    tfail "merge added new site"
+fi
+
+# emby whitelist preserve header only
+assert_ok "add emby for wl" cmd_add_emby embwl.example.com http://10.0.0.9:8096 --skip-dns-check
+f="$(find_site_file embwl.example.com)"
+python3 - "$f" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text()
+# inject custom header and a fake matcher that must NOT be preserved as-is if full extract
+# whitelist should keep header
+if "reverse_proxy" in t:
+    t = t.replace("    reverse_proxy", "    header X-Emby custom\n    reverse_proxy", 1)
+p.write_text(t)
+PY
+assert_ok "set emby target keeps header" cmd_set_emby_site embwl.example.com --target http://10.0.0.9:8097
+f="$(find_site_file embwl.example.com)"
+assert_file_has "$f" "header X-Emby custom" "emby whitelist header"
+assert_file_has "$f" "10.0.0.9:8097" "emby new target"
+
+# update --binary dry structure: function exists
+if declare -F update_caddy_binary_from_release >/dev/null; then
+    tpass "update_caddy_binary_from_release defined"
+else
+    tfail "update_caddy_binary_from_release defined"
+fi
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

@@ -504,6 +504,18 @@ cmd_update() {
     require_command curl
     require_command bash
 
+    local update_binary=0
+    local -a update_positional=()
+    while (( $# > 0 )); do
+        case "$1" in
+            --binary|--with-binary) update_binary=1 ;;
+            --) shift; while (( $# > 0 )); do update_positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 update 参数: $1"; return 1 ;;
+            *) update_positional+=("$1") ;;
+        esac
+        shift
+    done
+
     local url lib_url checksums_url base_url tmp tmp_lib target_bin target_alias lib_bin lib_mod_dir
     local -a modules=()
     # Under 'set -u', ${#_CADDYCTL_MODULES[@]} aborts if the array is unset.
@@ -640,6 +652,79 @@ cmd_update() {
     say "  $target_alias -> $target_bin"
     say "  $lib_bin"
     say "  $lib_mod_dir/*.sh"
+
+    if (( update_binary == 1 )); then
+        if ! update_caddy_binary_from_release; then
+            fail "脚本已更新，但 Caddy 二进制更新失败。可稍后重试: c update --binary"
+            return 1
+        fi
+    fi
+}
+
+# Download prebuilt caddy from GitHub Releases (checksums.txt entry: caddy).
+update_caddy_binary_from_release() {
+    require_command curl
+    require_command sha256sum
+
+    local ref tag asset_url checksums_url tmp expected actual target
+    ref="${CADDY_CLI_REF:-${DEFAULT_REF:-main}}"
+    tag="$ref"
+    # Prefer explicit override, else GitHub release asset for this tag.
+    asset_url="${CADDYCTL_BINARY_URL:-https://github.com/buglyz/caddy_cli/releases/download/${tag}/caddy}"
+    checksums_url="${CADDYCTL_CHECKSUMS_URL:-${DEFAULT_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${tag}}/checksums.txt}"
+    # If DEFAULT_BASE_URL is a full file URL, strip filename
+    if [[ "$checksums_url" == */caddy.sh ]]; then
+        checksums_url="${checksums_url%/*}/checksums.txt"
+    elif [[ "$checksums_url" != *checksums.txt ]]; then
+        checksums_url="${checksums_url%/}/checksums.txt"
+    fi
+
+    target="$(command -v caddy 2>/dev/null || true)"
+    if [[ -z "$target" ]]; then
+        target="/usr/bin/caddy"
+    fi
+
+    tmp="$(mktemp)"
+    say "正在下载 Caddy 二进制: $asset_url"
+    if ! curl -fsSL --retry 3 --retry-delay 1 -L "$asset_url" -o "$tmp"; then
+        cleanup_paths "$tmp"
+        fail "下载 Caddy 二进制失败: $asset_url"
+        return 1
+    fi
+    if [[ ! -s "$tmp" ]]; then
+        cleanup_paths "$tmp"
+        fail "Caddy 二进制下载为空"
+        return 1
+    fi
+
+    if [[ "${CADDYCTL_SKIP_CHECKSUM:-0}" != "1" ]]; then
+        if ! verify_download_checksum "$tmp" "caddy" "$checksums_url"; then
+            cleanup_paths "$tmp"
+            return 1
+        fi
+    else
+        say "(Warning) 跳过 Caddy 二进制 SHA256 校验"
+    fi
+
+    chmod 755 "$tmp"
+    # basic sanity: ELF or executable
+    if ! head -c 4 "$tmp" | grep -q $'ELF' 2>/dev/null; then
+        # still allow if file is large enough (cross-platform)
+        if [[ "$(wc -c < "$tmp")" -lt 1000000 ]]; then
+            cleanup_paths "$tmp"
+            fail "下载内容不像有效的 caddy 二进制"
+            return 1
+        fi
+    fi
+
+    install -d -m 0755 "$(dirname "$target")"
+    install -m 0755 "$tmp" "$target"
+    cleanup_paths "$tmp"
+    say "Caddy 二进制已更新: $target"
+    if command_exists "$target"; then
+        "$target" version 2>/dev/null | head -n 1 || true
+    fi
+    return 0
 }
 
 install_caddy_via_apt() {
@@ -732,8 +817,9 @@ cmd_show_help() {
   c list
   c add <域名> <本地端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
   c add-static <域名> <目录> [--http|--https] [--spa] [--dns-only] [--skip-dns-check]
-  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--dns-only]
-  # set 会重建模板，但尽量保留 header/basicauth/log 等自定义指令；静态站请用 add-static 重建
+  c set <域名> [--port|--path|--root|--spa|--no-spa|--http|--https|--dns-only]
+  c set-static <域名> [--root <目录>] [--spa|--no-spa] [--http|--https] [--dns-only]
+  # set 重建模板时尽量保留自定义指令；网关/Emby 仅保留 header/basicauth/log 白名单
   c enable <域名>
   c disable <域名>
   c rm <域名>
@@ -752,7 +838,8 @@ Emby 管理:
 
 配置与全局设置:
   c email [邮箱]
-  c import [现有Caddyfile路径]
+  c import [--merge] [--force] [Caddyfile路径]
+  # 默认替换 sites.d；--merge 合并；非交互覆盖需 --force 或 CADDYCTL_IMPORT_FORCE=1
   c config
   c validate
   c apply
@@ -837,22 +924,35 @@ restore_import_snapshot() {
 cmd_import() {
     require_command python3
 
-    local src="${1:-$CADDYFILE}"
+    local merge_mode=0
+    local force_mode=0
+    local -a positional=()
+    while (( $# > 0 )); do
+        case "$1" in
+            --merge) merge_mode=1 ;;
+            --force) force_mode=1; CADDYCTL_IMPORT_FORCE=1 ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 import 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    local src="${positional[0]:-$CADDYFILE}"
     if [[ ! -f "$src" ]]; then
         fail "找不到源文件: $src"
         return 1
     fi
 
-    # Import replaces managed sites.d / globals.d contents. Guard against
-    # accidental wipe in non-interactive shells and require explicit confirm
-    # when existing configs are present (override with CADDYCTL_IMPORT_FORCE=1).
+    # Replace mode clears managed dirs. Merge mode keeps existing files and only
+    # adds/overwrites imported site confs + globals snippet.
     local existing_count=0
     shopt -s nullglob
     local _existing=("$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled "$GLOBALS_DIR"/*.inc)
     existing_count=${#_existing[@]}
     shopt -u nullglob
-    if (( existing_count > 0 )); then
+    if (( existing_count > 0 && merge_mode == 0 )); then
         say "警告: import 会清空并替换现有站点/全局片段（当前约 ${existing_count} 个文件）。"
+        say "提示: 使用 --merge 可在保留现有站点的前提下合并导入。"
         if [[ "${CADDYCTL_IMPORT_FORCE:-0}" != "1" ]]; then
             if [[ -t 0 ]]; then
                 if ! prompt_yes_no "确认继续导入并覆盖现有配置"; then
@@ -860,15 +960,19 @@ cmd_import() {
                     return 1
                 fi
             else
-                fail "非交互环境检测到已有站点配置。确认覆盖请设置 CADDYCTL_IMPORT_FORCE=1 后重试。"
+                fail "非交互环境检测到已有站点配置。覆盖请加 --force（或 CADDYCTL_IMPORT_FORCE=1），合并请加 --merge。"
                 return 1
             fi
         else
-            say "CADDYCTL_IMPORT_FORCE=1：跳过确认，继续导入。"
+            say "强制覆盖模式：跳过确认，继续导入。"
         fi
+    fi
+    if (( merge_mode == 1 )); then
+        say "import --merge：保留现有站点，合并导入源中的站点块。"
     fi
 
     local sites_bak globals_bak state_bak old_email tmp_src meta fmt_bin
+    local import_sites_dir import_globals_dir
     tmp_src="$(mktemp)"
     if ! cp -a "$src" "$tmp_src"; then
         cleanup_paths "$tmp_src"
@@ -888,10 +992,17 @@ cmd_import() {
     cp -a "$GLOBALS_DIR"/. "$globals_bak"/ 2>/dev/null || true
     cp -a "$STATE_FILE" "$state_bak" 2>/dev/null || true
 
-    clear_managed_dir "$SITES_DIR"
-    clear_managed_dir "$GLOBALS_DIR"
+    import_sites_dir="$SITES_DIR"
+    import_globals_dir="$GLOBALS_DIR"
+    if (( merge_mode == 1 )); then
+        import_sites_dir="$(mktemp -d "$BACKUP_DIR/import-sites.XXXXXX")"
+        import_globals_dir="$(mktemp -d "$BACKUP_DIR/import-globals.XXXXXX")"
+    else
+        clear_managed_dir "$SITES_DIR"
+        clear_managed_dir "$GLOBALS_DIR"
+    fi
 
-    meta="$(python3 - "$tmp_src" "$GLOBALS_DIR" "$SITES_DIR" <<'PY'
+    meta="$(python3 - "$tmp_src" "$import_globals_dir" "$import_sites_dir" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -1028,9 +1139,27 @@ PY
     )" || {
         fail "导入失败，正在回滚目录。"
         restore_import_snapshot "$sites_bak" "$globals_bak" "$state_bak" "$old_email"
-        cleanup_paths "$sites_bak" "$globals_bak" "$tmp_src" "$state_bak"
+        cleanup_paths "$sites_bak" "$globals_bak" "$tmp_src" "$state_bak" "${import_sites_dir:-}" "${import_globals_dir:-}"
         return 1
     }
+
+    if (( merge_mode == 1 )); then
+        # Copy imported site files into live dir (overwrite same basename).
+        local f base
+        shopt -s nullglob
+        for f in "$import_sites_dir"/*.conf; do
+            base="$(basename "$f")"
+            cp -a "$f" "$SITES_DIR/$base"
+            say "合并站点: $base"
+        done
+        # Merge globals: append imported global snippet as 00-imported.inc (overwrite that name only)
+        if [[ -f "$import_globals_dir/00-imported.inc" ]]; then
+            cp -a "$import_globals_dir/00-imported.inc" "$GLOBALS_DIR/00-imported.inc"
+            say "合并全局片段: 00-imported.inc"
+        fi
+        shopt -u nullglob
+        cleanup_paths "$import_sites_dir" "$import_globals_dir"
+    fi
 
     if [[ "$meta" =~ ^EMAIL=(.*)$ ]]; then
         EMAIL="${BASH_REMATCH[1]}"
@@ -1356,7 +1485,7 @@ main() {
     case "$cmd" in
         install) with_global_lock cmd_install ;;
         install-self|self-install) with_global_lock cmd_install_self ;;
-        update) with_global_lock cmd_update ;;
+        update) shift; with_global_lock cmd_update "$@" ;;
         add) shift; require_command caddy; with_global_lock run_mutation add cmd_add "$@" ;;
         add-static|static) shift; require_command caddy; with_global_lock run_mutation add-static cmd_add_static "$@" ;;
         add-emby|emby) shift; require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby "$@" ;;
@@ -1365,13 +1494,14 @@ main() {
         set-gateway) shift; require_command caddy; with_global_lock run_mutation set-gateway cmd_set_gateway "$@" ;;
         rm-emby|del-emby|delete-emby) shift; require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby "$@" ;;
         set) shift; require_command caddy; with_global_lock run_mutation set cmd_set "$@" ;;
+        set-static) shift; require_command caddy; with_global_lock run_mutation set-static cmd_set_static "$@" ;;
         rm|del|delete) shift; require_command caddy; with_global_lock run_mutation rm cmd_rm "${1:-}" ;;
         enable) shift; require_command caddy; with_global_lock run_mutation enable cmd_enable "${1:-}" ;;
         disable) shift; require_command caddy; with_global_lock run_mutation disable cmd_disable "${1:-}" ;;
         email) shift; require_command caddy; with_global_lock run_mutation email cmd_email "${1:-}" ;;
         timeout) shift; with_global_lock run_mutation timeout cmd_timeout "${1:-}" ;;
         upstream-mode) shift; with_global_lock run_mutation upstream-mode cmd_upstream_mode "${1:-}" ;;
-        import) shift; require_command caddy; with_global_lock run_mutation import cmd_import "${1:-}" ;;
+        import) shift; require_command caddy; with_global_lock run_mutation import cmd_import "$@" ;;
         apply|reload) require_command caddy; with_global_lock run_mutation apply cmd_apply ;;
         undo) shift; require_command caddy; with_global_lock cmd_undo "${1:-latest}" ;;
         start) with_global_lock cmd_start ;;

@@ -392,6 +392,136 @@ cmd_add_static() {
     fi
 }
 
+
+extract_static_root_from_file() {
+    local file="$1"
+    # root * /path  or root * "/path with spaces"
+    local line
+    line="$(sed -n 's/^[[:space:]]*root[[:space:]]\+\*[[:space:]]\+//p' "$file" | head -n 1)"
+    line="$(trim "$line")"
+    line="$(strip_wrapping_quotes "$line")"
+    printf '%s' "$line"
+}
+
+extract_static_spa_from_file() {
+    local file="$1"
+    if grep -Eq '^[[:space:]]*try_files[[:space:]]' "$file" 2>/dev/null; then
+        printf 'on'
+    else
+        printf 'off'
+    fi
+}
+
+cmd_set_static() {
+    local query=""
+    local override_root="__keep__"
+    local override_spa="__keep__"
+    local override_scheme=""
+    local force_dns_tls=0
+    local -a positional=()
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --root)
+                shift
+                [[ $# -gt 0 ]] || { fail "--root 需要目录路径"; return 1; }
+                override_root="$1"
+                ;;
+            --spa) override_spa="on" ;;
+            --no-spa) override_spa="off" ;;
+            --dns-only) force_dns_tls=1 ;;
+            --http|--no-ssl) override_scheme="http" ;;
+            --https) override_scheme="https" ;;
+            --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
+            --*) fail "未知 set-static 参数: $1"; return 1 ;;
+            *) positional+=("$1") ;;
+        esac
+        shift
+    done
+    query="${positional[0]:-}"
+
+    if [[ -z "$query" ]]; then
+        read -rp "输入要编辑的静态站点地址: " query
+    fi
+    query="$(trim "$query")"
+    if [[ -z "$query" ]]; then
+        fail "站点地址不能为空"
+        return 1
+    fi
+
+    local file site_type label site_dir spa_mode scheme dns_flag oldbak extras site_block
+    if ! file="$(find_site_file "$query")"; then
+        fail "未找到该站点"
+        return 1
+    fi
+    site_type="$(detect_site_type "$file")"
+    if [[ "$site_type" != "静态站点" ]]; then
+        fail "该配置不是静态站点: $query（当前类型: $site_type）。请使用: c set / c set-static"
+        return 1
+    fi
+    if ! label="$(extract_primary_site_label_from_file "$file")"; then
+        fail "无法解析站点标签"
+        return 1
+    fi
+
+    site_dir="$(extract_static_root_from_file "$file")"
+    spa_mode="$(extract_static_spa_from_file "$file")"
+    # Infer scheme from header labels
+    if grep -Eq '^[[:space:]]*http://' "$file" 2>/dev/null || grep -Eq '^http://' "$file" 2>/dev/null; then
+        scheme="http"
+    else
+        scheme="https"
+    fi
+    # Better: if primary label starts with http
+    if [[ "$label" == http://* ]]; then
+        scheme="http"
+        label="${label#http://}"
+        label="${label#https://}"
+    fi
+
+    if [[ "$override_root" != "__keep__" ]]; then
+        site_dir="$(trim "$override_root")"
+    fi
+    if [[ "$override_spa" != "__keep__" ]]; then
+        spa_mode="$override_spa"
+    fi
+    if [[ -n "$override_scheme" ]]; then
+        scheme="$override_scheme"
+    fi
+
+    if ! validate_site_label "$label"; then
+        fail "站点地址不合法"
+        return 1
+    fi
+    if ! validate_static_dir "$site_dir"; then
+        fail "静态目录路径不合法"
+        return 1
+    fi
+
+    oldbak="$(backup_file_if_exists "$file")"
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
+    extras="$(extract_site_extra_directives "$file" 2>/dev/null || true)"
+    site_block="$(with_dns_tls_flag "$dns_flag" build_static_site_block "$label" "$site_dir" "$spa_mode" "$scheme")"
+    if [[ -n "$extras" ]]; then
+        site_block="$(inject_site_extra_directives "$site_block" "$extras")"
+        say "已保留站点自定义指令（header/basicauth/log 等）"
+    fi
+    printf '%s\n' "$site_block" > "$file"
+
+    if is_site_enabled "$file"; then
+        if ! write_site_file_with_rollback "$file" "$oldbak"; then
+            fail "已回滚静态站点修改"
+            return 1
+        fi
+        say "已更新静态站点: $label -> $site_dir"
+    else
+        chmod 644 "$file"
+        chown root:caddy "$file" 2>/dev/null || true
+        cleanup_paths "$oldbak"
+        say "已更新禁用静态站点（未生效）: $label -> $site_dir"
+    fi
+}
+
 cmd_set_emby_file() {
     local file="$1"
     local site_type="$2"
@@ -466,9 +596,15 @@ cmd_set_emby_file() {
     say "新目标: ${label} → ${new_target}"
     say "当前协议: ${scheme}，如需切换请在 cmd_set 调用时使用 --http / --https"
 
-    local site_block dns_flag
+    local site_block dns_flag extras
     dns_flag="$(resolve_dns_tls_flag "${CADDYCTL_FORCE_DNS_TLS:-0}" "$scheme" "$file")"
+    extras="$(extract_site_extra_directives "$file" 2>/dev/null || true)"
+    extras="$(filter_whitelist_site_extras "$extras" 2>/dev/null || true)"
     site_block="$(with_dns_tls_flag "$dns_flag" build_emby_site_block "$label" "$new_target" "$scheme")"
+    if [[ -n "$extras" ]]; then
+        site_block="$(inject_site_extra_directives "$site_block" "$extras")"
+        say "已保留白名单自定义指令（header/basicauth/log）"
+    fi
 
     local oldbak=""
     oldbak="$(backup_file_if_exists "$file")"
@@ -484,6 +620,8 @@ cmd_set() {
     local override_path="__keep__"
     local override_scheme=""
     local override_emby_target=""
+    local override_static_root="__keep__"
+    local override_static_spa="__keep__"
     local force_dns_tls=0
     local -a positional=()
 
@@ -504,6 +642,13 @@ cmd_set() {
                 [[ $# -gt 0 ]] || { fail "--target 需要目标地址参数"; return 1; }
                 override_emby_target="$1"
                 ;;
+            --root)
+                shift
+                [[ $# -gt 0 ]] || { fail "--root 需要目录路径"; return 1; }
+                override_static_root="$1"
+                ;;
+            --spa) override_static_spa="on" ;;
+            --no-spa) override_static_spa="off" ;;
             --dns-only) force_dns_tls=1 ;;
             --http) override_scheme="http" ;;
             --https) override_scheme="https" ;;
@@ -532,8 +677,27 @@ cmd_set() {
 
     site_type="$(detect_site_type "$file")"
     if [[ "$site_type" == "静态站点" ]]; then
-        fail "当前仅支持编辑反代站点与路径反代站点，静态站点请使用 add-static 重新配置。"
-        return 1
+        # Delegate to set-static; map common flags.
+        local -a sargs=("$query")
+        if [[ -n "$override_scheme" ]]; then
+            sargs+=("--$override_scheme")
+        fi
+        if (( force_dns_tls == 1 )); then
+            sargs+=(--dns-only)
+        fi
+        # allow --root / --spa via unknown? cmd_set doesn't parse them yet — add below
+        if [[ "${override_static_root:-__keep__}" != "__keep__" ]]; then
+            sargs+=(--root "$override_static_root")
+        fi
+        if [[ "${override_static_spa:-__keep__}" != "__keep__" ]]; then
+            if [[ "$override_static_spa" == "on" ]]; then
+                sargs+=(--spa)
+            else
+                sargs+=(--no-spa)
+            fi
+        fi
+        cmd_set_static "${sargs[@]}"
+        return $?
     fi
 
     if [[ "$site_type" == "Emby反代" ]]; then
@@ -753,9 +917,15 @@ cmd_set_gateway() {
         allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
     fi
 
-    local dns_flag
+    local dns_flag extras
     dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
+    extras="$(extract_site_extra_directives "$file" 2>/dev/null || true)"
+    extras="$(filter_whitelist_site_extras "$extras" 2>/dev/null || true)"
     site_block="$(with_dns_tls_flag "$dns_flag" build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
+    if [[ -n "$extras" ]]; then
+        site_block="$(inject_site_extra_directives "$site_block" "$extras")"
+        say "已保留白名单自定义指令（header/basicauth/log）"
+    fi
     oldbak="$(backup_file_if_exists "$file")"
     printf '%s\n' "$site_block" > "$file"
 
@@ -984,10 +1154,12 @@ find_site_file() {
                 echo "${fuzzy_matches[0]}"
                 return 0
             fi
-        else
-            fail "匹配到模糊结果，请使用更精确的站点标识。"
+            return 1
         fi
-        return 1
+        # Non-interactive: auto-accept the single fuzzy match with a warning.
+        echo "警告: 非交互模式自动采用唯一模糊匹配: $(basename "${fuzzy_matches[0]}")" >&2
+        echo "${fuzzy_matches[0]}"
+        return 0
     fi
 
     if (( ${#fuzzy_matches[@]} > 1 )); then
