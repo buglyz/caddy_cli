@@ -588,6 +588,50 @@ else
 fi
 
 # ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+section "13) import safety"
+# ─────────────────────────────────────────────
+# seed a site then try import without force in non-interactive mode
+rm -f "$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled 2>/dev/null || true
+assert_ok "seed before import" cmd_add seed.example.com 18080 --skip-dns-check
+cat >"$tmpdir/import-src.Caddyfile" <<'EOF'
+{
+    email import-test@example.org
+}
+imported.example.com {
+    reverse_proxy 127.0.0.1:18081
+}
+EOF
+# Note: do not use `env VAR=... shell_function` — env cannot run bash functions (exit 127).
+if CADDYCTL_IMPORT_FORCE=0 cmd_import "$tmpdir/import-src.Caddyfile" >/dev/null 2>&1; then
+    tfail "import requires force when sites exist"
+else
+    tpass "import requires force when sites exist"
+fi
+if find_site_file seed.example.com >/dev/null 2>&1; then
+    tpass "import without force kept existing site"
+else
+    tfail "import without force should keep existing site"
+fi
+
+if CADDYCTL_IMPORT_FORCE=1 cmd_import "$tmpdir/import-src.Caddyfile" >/dev/null 2>&1; then
+    tpass "import with force"
+else
+    tfail "import with force"
+fi
+if find_site_file imported.example.com >/dev/null 2>&1; then
+    tpass "import force created imported site"
+else
+    tfail "import force missing imported site"
+fi
+if find_site_file seed.example.com >/dev/null 2>&1; then
+    tfail "import force should have replaced seed site"
+else
+    tpass "import force replaced previous sites"
+fi
+assert_eq "$EMAIL" "import-test@example.org" "import applied email"
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

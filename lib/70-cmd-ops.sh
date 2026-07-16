@@ -842,6 +842,31 @@ cmd_import() {
         return 1
     fi
 
+    # Import replaces managed sites.d / globals.d contents. Guard against
+    # accidental wipe in non-interactive shells and require explicit confirm
+    # when existing configs are present (override with CADDYCTL_IMPORT_FORCE=1).
+    local existing_count=0
+    shopt -s nullglob
+    local _existing=("$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled "$GLOBALS_DIR"/*.inc)
+    existing_count=${#_existing[@]}
+    shopt -u nullglob
+    if (( existing_count > 0 )); then
+        say "警告: import 会清空并替换现有站点/全局片段（当前约 ${existing_count} 个文件）。"
+        if [[ "${CADDYCTL_IMPORT_FORCE:-0}" != "1" ]]; then
+            if [[ -t 0 ]]; then
+                if ! prompt_yes_no "确认继续导入并覆盖现有配置"; then
+                    say "已取消导入"
+                    return 1
+                fi
+            else
+                fail "非交互环境检测到已有站点配置。确认覆盖请设置 CADDYCTL_IMPORT_FORCE=1 后重试。"
+                return 1
+            fi
+        else
+            say "CADDYCTL_IMPORT_FORCE=1：跳过确认，继续导入。"
+        fi
+    fi
+
     local sites_bak globals_bak state_bak old_email tmp_src meta fmt_bin
     tmp_src="$(mktemp)"
     if ! cp -a "$src" "$tmp_src"; then
