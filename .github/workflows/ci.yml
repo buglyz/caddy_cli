@@ -266,6 +266,10 @@ jobs:
         run: |
           tests/smoke.sh
 
+      - name: Functional suite
+        run: |
+          tests/functional.sh
+
       - name: ShellCheck
         run: |
           shellcheck -x \

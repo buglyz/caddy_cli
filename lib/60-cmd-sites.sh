@@ -262,8 +262,15 @@ cmd_add() {
         fi
     fi
 
-    local file oldbak=""
+    local file oldbak="" disabled
     file="$(site_path_for_label "$label")"
+    disabled="$(disabled_site_path_for "$file")"
+
+    if [[ -s "$file" || -s "$disabled" ]]; then
+        fail "配置已存在: ${file}${disabled:+ 或 $disabled}"
+        say "如需修改请使用: c set $label ..."
+        return 1
+    fi
 
     if (( skip_dns_check == 0 )); then
         if ! check_site_dns_points_to_local "$label"; then
@@ -348,8 +355,15 @@ cmd_add_static() {
         return 1
     fi
 
-    local file oldbak=""
+    local file oldbak="" disabled
     file="$(site_path_for_label "$label")"
+    disabled="$(disabled_site_path_for "$file")"
+
+    if [[ -s "$file" || -s "$disabled" ]]; then
+        fail "配置已存在: ${file}${disabled:+ 或 $disabled}"
+        say "如需修改请先 c rm $label 后再创建，或直接编辑后 c apply"
+        return 1
+    fi
 
     if (( skip_dns_check == 0 )); then
         if ! check_site_dns_points_to_local "$label"; then
@@ -421,7 +435,8 @@ cmd_set_emby_file() {
     if [[ -n "$override_emby_target" ]]; then
         new_target="$override_emby_target"
         say "使用指定目标: $new_target"
-    elif [[ -n "$override_scheme" ]]; then
+    elif [[ -n "$override_scheme" || "${CADDYCTL_FORCE_DNS_TLS:-0}" == "1" ]]; then
+        # scheme-only or --dns-only updates should keep the current upstream.
         new_target="$current_target"
         say "保持当前目标: $new_target"
     else

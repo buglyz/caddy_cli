@@ -11,5 +11,5 @@ cd134d40cb624e3cb82a2816b1679bffd2e72a6510be6077241efa77382acff3  lib/00-core.sh
 0a7df8d6e8c808decf412c7c63be8af0c19036c17487f412a0a0cb14344b0a34  lib/30-service.sh
 dddf436ad88df6b78dcd5df87362e2a5dce152dfc4b725bad42c512ad9bd7558  lib/40-lock-snapshot.sh
 5fddfea56b6112c4f3cc4010229d4e0fa81bc2bd6d31e719909329917452ff6e  lib/50-sites.sh
-c8ab45f6c7dd12beacdc3bb08979cc2e6be77f32efab68e49db7e6e153e6207a  lib/60-cmd-sites.sh
+ee2c30ca7d1e0a11d03173796ee58e998e88ab91f7d85dca9d266bb70d4701aa  lib/60-cmd-sites.sh
 851c9acc192ca70ace2b6cbdcec228742a1f5494a223e21439ebd8063d998afc  lib/70-cmd-ops.sh

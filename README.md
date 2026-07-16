@@ -152,6 +152,13 @@ c update
 | `/usr/local/bin/caddy-lib.sh` | 共享库入口 |
 | `/usr/local/lib/caddyctl/*.sh` | 共享库模块 |
 
+## 测试
+
+```bash
+bash tests/smoke.sh
+bash tests/functional.sh   # 隔离环境全功能回归（不碰生产 /etc/caddy）
+```
+
 ## 排障
 
 ```bash
