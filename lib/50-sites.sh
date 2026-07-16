@@ -562,18 +562,34 @@ format_site_label_for_scheme() {
     local part out=""
     local -a parts=()
 
-    if [[ "$scheme" != "http" ]]; then
-        printf '%s' "$label"
-        return 0
-    fi
-
+    # Always normalize parts by stripping any existing scheme prefix so rebuilds
+    # (cmd_set) don't produce http://http://example.com.
     IFS=',' read -ra parts <<< "$label"
+    local -a cleaned=()
     for part in "${parts[@]}"; do
         part="$(trim "$part")"
         [[ -n "$part" ]] || continue
-        out="${out:+$out, }http://${part}"
+        part="${part#http://}"
+        part="${part#https://}"
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        cleaned+=("$part")
     done
 
+    if [[ "$scheme" != "http" ]]; then
+        # Join cleaned bare labels (preserve comma+space style).
+        out=""
+        for part in "${cleaned[@]}"; do
+            out="${out:+$out, }$part"
+        done
+        printf '%s' "$out"
+        return 0
+    fi
+
+    out=""
+    for part in "${cleaned[@]}"; do
+        out="${out:+$out, }http://${part}"
+    done
     printf '%s' "$out"
 }
 

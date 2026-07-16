@@ -1052,22 +1052,42 @@ print_site_entry() {
 extract_primary_site_label_from_file() {
     local file="$1"
     local -a headers=()
-    local header=""
+    local header="" part out=""
+    local -a parts=() cleaned=()
 
     mapfile -t headers < <(sed -n 's/^\([^[:space:]].*\)[[:space:]]*{[[:space:]]*$/\1/p' "$file")
     for header in "${headers[@]}"; do
         header="$(trim "$header")"
         [[ -n "$header" ]] || continue
-        if [[ "$header" != www.* ]]; then
-            printf '%s' "$header"
-            return 0
+        # Prefer non-www headers when present.
+        if [[ "$header" == www.* ]]; then
+            continue
         fi
+        break
     done
-    if (( ${#headers[@]} > 0 )); then
-        printf '%s' "$(trim "${headers[0]}")"
-        return 0
+    if [[ -z "$header" && ${#headers[@]} -gt 0 ]]; then
+        header="$(trim "${headers[0]}")"
     fi
-    return 1
+    [[ -n "$header" ]] || return 1
+
+    # Strip scheme prefixes so callers can pass label back into builders safely.
+    IFS=',' read -ra parts <<< "$header"
+    for part in "${parts[@]}"; do
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        part="${part#http://}"
+        part="${part#https://}"
+        part="$(trim "$part")"
+        [[ -n "$part" ]] || continue
+        cleaned+=("$part")
+    done
+    ((${#cleaned[@]} > 0)) || return 1
+
+    out=""
+    for part in "${cleaned[@]}"; do
+        out="${out:+$out, }$part"
+    done
+    printf '%s' "$out"
 }
 
 extract_reverse_proxy_target() {

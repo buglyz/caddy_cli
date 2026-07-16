@@ -364,6 +364,14 @@ assert_ok "cmd_add multi-label http" cmd_add "multi.example.com, api2.example.co
 f="$(site_path_for_label 'multi.example.com, api2.example.com')"
 assert_file_has "$f" "http://multi.example.com, http://api2.example.com" "multi-label http prefixes"
 
+assert_ok "cmd_set multi-label http port" cmd_set multi.example.com --port 3201
+f="$(find_site_file multi.example.com)"
+assert_file_has "$f" "127.0.0.1:3201" "multi-label set updated port"
+assert_file_has "$f" "http://multi.example.com, http://api2.example.com" "multi-label set kept single http prefix"
+assert_not_contains "$(cat "$f")" "http://http://" "multi-label set no double http prefix"
+assert_ok "find multi-label after set" find_site_file multi.example.com
+assert_ok "find second label after set" find_site_file api2.example.com
+
 # ─────────────────────────────────────────────
 section "6) cmd_add_static / cmd_add_emby / cmd_add_gateway"
 # ─────────────────────────────────────────────
