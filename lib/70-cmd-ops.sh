@@ -1215,18 +1215,18 @@ show_menu_header() {
 menu_main() {
     show_menu_header "Caddy CLI 管理面板"
     echo ""
-    echo "【总览】"
-    echo "1. 查看所有站点"
-    echo "2. 服务状态"
-    echo "3. 实时日志"
-    echo ""
     echo "【站点】"
-    echo "4. 站点管理（反代 / 静态）"
-    echo "5. Emby / 网关"
+    echo "1. 站点管理（反代 / 静态）"
+    echo "2. Emby / 网关"
+    echo "3. 查看所有站点"
     echo ""
-    echo "【系统】"
+    echo "【运维】"
+    echo "4. 服务状态"
+    echo "5. 实时日志"
     echo "6. 服务与配置"
     echo "7. 诊断与备份"
+    echo ""
+    echo "【系统】"
     echo "8. 安装与更新"
     echo ""
     echo "0. 退出"
@@ -1427,11 +1427,11 @@ interactive_menu() {
         menu_main
         read -rp "选择: " choice
         case "$choice" in
-            1) cmd_list; pause_menu ;;
-            2) cmd_status; pause_menu ;;
-            3) cmd_logs; pause_menu ;;
-            4) interactive_sites_menu ;;
-            5) interactive_emby_menu ;;
+            1) interactive_sites_menu ;;
+            2) interactive_emby_menu ;;
+            3) cmd_list; pause_menu ;;
+            4) cmd_status; pause_menu ;;
+            5) cmd_logs; pause_menu ;;
             6) interactive_config_menu ;;
             7) interactive_diagnostics_menu ;;
             8) interactive_install_menu ;;
