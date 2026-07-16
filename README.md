@@ -14,12 +14,12 @@
 
 **标准版：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r9/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r10/install.sh)
 ```
 
 **Cloudflare DNS 版（自动申请泛域名证书）：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r9/install-cloudflare.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r10/install-cloudflare.sh)
 ```
 
 > Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
@@ -119,7 +119,7 @@ c update
 
 ## 供应链与安全
 
-- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r9`，并校验同 tag 下的 `checksums.txt`。
+- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r10`，并校验同 tag 下的 `checksums.txt`。
 - Cloudflare 版预编译 `caddy` **仅通过 GitHub Release 分发**（仓库不再追踪 46MB 二进制）；安装脚本下载 Release 资产并校验 checksum，不可用时用 `--build-from-source`。
 - `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
 - Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
