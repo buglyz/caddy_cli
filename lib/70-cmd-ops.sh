@@ -733,6 +733,7 @@ cmd_show_help() {
   c add <域名> <本地端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
   c add-static <域名> <目录> [--http|--https] [--spa] [--dns-only] [--skip-dns-check]
   c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--dns-only]
+  # set 会重建模板，但尽量保留 header/basicauth/log 等自定义指令；静态站请用 add-static 重建
   c enable <域名>
   c disable <域名>
   c rm <域名>

@@ -632,6 +632,31 @@ else
 fi
 assert_eq "$EMAIL" "import-test@example.org" "import applied email"
 
+
+# ─────────────────────────────────────────────
+section "14) set preserves custom directives"
+# ─────────────────────────────────────────────
+assert_ok "seed site for preserve" cmd_add keepcustom.example.com 19000 --skip-dns-check
+f="$(find_site_file keepcustom.example.com)"
+python3 - "$f" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text().replace(
+    "    reverse_proxy",
+    "    header X-App custom\n    basic_auth {\n        user hash\n    }\n    reverse_proxy",
+)
+p.write_text(t)
+PY
+assert_ok "set port keeps customs" cmd_set keepcustom.example.com --port 19001
+f="$(find_site_file keepcustom.example.com)"
+assert_file_has "$f" "127.0.0.1:19001" "preserve set port"
+assert_file_has "$f" "header X-App custom" "preserve header"
+assert_file_has "$f" "basic_auth" "preserve basic_auth"
+opens=$(grep -o '{' "$f" | wc -l)
+closes=$(grep -o '}' "$f" | wc -l)
+[[ "$opens" == "$closes" ]] && tpass "preserve brace balance" || tfail "preserve brace balance"
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

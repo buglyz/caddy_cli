@@ -635,6 +635,156 @@ resolve_dns_tls_flag() {
     printf '0'
 }
 
+
+# Extract non-template directives so `c set` rebuilds templates without
+# silently dropping operator customizations (header, basicauth, log, ...).
+extract_site_extra_directives() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    if command_exists python3; then
+        python3 - "$file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="ignore").splitlines()
+
+body = []
+depth = 0
+started = False
+for line in lines:
+    if not started:
+        if re.match(r"^\S.*\{\s*$", line):
+            started = True
+            depth = 1
+        continue
+    opens = line.count("{")
+    closes = line.count("}")
+    depth += opens - closes
+    if depth <= 0:
+        break
+    body.append(line)
+
+skip_line = re.compile(
+    r"^\s*(?:"
+    r"encode\b|reverse_proxy\b|uri\s+strip_prefix\b|tls\b|"
+    r"header_up\s+Host\s+\{upstream_hostport\}|"
+    r"file_server\b|try_files\b|root\s+\*|request_body\b|route\b|"
+    r'respond\s+"Not Found"|@path_|@gw_|handle\b|handle_path\b|'
+    r"rewrite\s+\*\s*\{|#\s*managed|#\s*通用反代网关|#\s*open dynamic proxy|#\s*allow-list"
+    r")"
+)
+
+def is_template(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return True
+    return bool(skip_line.match(line))
+
+i = 0
+out = []
+while i < len(body):
+    line = body[i]
+    if is_template(line):
+        if line.count("{") > line.count("}"):
+            d = line.count("{") - line.count("}")
+            i += 1
+            while i < len(body) and d > 0:
+                d += body[i].count("{") - body[i].count("}")
+                i += 1
+            continue
+        i += 1
+        continue
+    if line.count("{") > line.count("}"):
+        d = line.count("{") - line.count("}")
+        out.append(line)
+        i += 1
+        while i < len(body) and d > 0:
+            out.append(body[i])
+            d += body[i].count("{") - body[i].count("}")
+            i += 1
+        continue
+    out.append(line)
+    i += 1
+
+for line in out:
+    if line.startswith("\t"):
+        line = "    " + line.lstrip("\t")
+    print(line)
+PY
+        return 0
+    fi
+
+    # Fallback: keep simple single-line customs only.
+    awk '
+        BEGIN { in_site=0; depth=0 }
+        {
+            if (!in_site) {
+                if ($0 ~ /^[^[:space:]].*\{[[:space:]]*$/) { in_site=1; depth=1 }
+                next
+            }
+            line=$0
+            nopen = gsub(/\{/, "{", line); line=$0
+            nclose = gsub(/\}/, "}", line); line=$0
+            depth += nopen - nclose
+            if (depth <= 0) { in_site=0; next }
+            stripped=line; sub(/^[[:space:]]+/, "", stripped)
+            if (stripped ~ /^(encode|reverse_proxy|uri strip_prefix|tls|header_up Host|file_server|try_files|root \*|request_body|route|respond "Not Found"|@path_|@gw_|handle|handle_path|#)/) next
+            if (stripped == "") next
+            if (nopen > nclose) next
+            print line
+        }
+    ' "$file"
+}
+
+inject_site_extra_directives() {
+    local block="$1"
+    local extras="$2"
+    [[ -n "$extras" ]] || { printf '%s\n' "$block"; return 0; }
+
+    if command_exists python3; then
+        BLOCK_TEXT="$block" EXTRAS_TEXT="$extras" python3 <<'PY'
+import os
+block = os.environ.get("BLOCK_TEXT", "")
+extras = os.environ.get("EXTRAS_TEXT", "")
+if not block.endswith("\n"):
+    block += "\n"
+lines = block.splitlines()
+cut = len(lines) - 1
+for i in range(len(lines) - 1, -1, -1):
+    if lines[i].strip() == "}":
+        cut = i
+        break
+out = lines[:cut]
+for el in extras.splitlines():
+    if el.strip() != "":
+        out.append(el)
+out.extend(lines[cut:])
+print("\n".join(out))
+PY
+        return 0
+    fi
+
+    local tmp_block tmp_extras
+    tmp_block="$(mktemp)"
+    tmp_extras="$(mktemp)"
+    printf '%s\n' "$block" > "$tmp_block"
+    printf '%s\n' "$extras" > "$tmp_extras"
+    awk '
+        NR==FNR { ex[NR]=$0; nex=NR; next }
+        { lines[NR]=$0; n=NR }
+        END {
+            cut=n
+            for (i=n; i>=1; i--) if (lines[i] ~ /^[[:space:]]*}[[:space:]]*$/) { cut=i; break }
+            for (i=1; i<cut; i++) print lines[i]
+            for (i=1; i<=nex; i++) if (ex[i] != "") print ex[i]
+            for (i=cut; i<=n; i++) print lines[i]
+        }
+    ' "$tmp_extras" "$tmp_block"
+    rm -f "$tmp_block" "$tmp_extras"
+}
+
 emit_site_common_blocks() {
     local emit_tls="${1:-yes}"
     cat <<'EOF'

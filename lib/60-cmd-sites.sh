@@ -179,7 +179,7 @@ cmd_add_gateway() {
         fi
     fi
 
-    local dns_flag
+    local dns_flag site_block
     dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "")"
     site_block="$(with_dns_tls_flag "$dns_flag" build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     ensure_dirs
@@ -590,16 +590,22 @@ cmd_set() {
         esac
     fi
 
-    local oldbak tmp dns_flag
+    local oldbak tmp dns_flag extras site_block
     oldbak="$(backup_file_if_exists "$file")"
     tmp="$(mktemp)"
     dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
+    extras="$(extract_site_extra_directives "$file" 2>/dev/null || true)"
 
     if [[ -n "$path_prefix" ]]; then
-        with_dns_tls_flag "$dns_flag" build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme" > "$tmp"
+        site_block="$(with_dns_tls_flag "$dns_flag" build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme")"
     else
-        with_dns_tls_flag "$dns_flag" build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme" > "$tmp"
+        site_block="$(with_dns_tls_flag "$dns_flag" build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme")"
     fi
+    if [[ -n "$extras" ]]; then
+        site_block="$(inject_site_extra_directives "$site_block" "$extras")"
+        say "已保留站点自定义指令（header/basicauth/log 等）"
+    fi
+    printf '%s\n' "$site_block" > "$tmp"
     mv "$tmp" "$file"
 
     if is_site_enabled "$file"; then

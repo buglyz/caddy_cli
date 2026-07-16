@@ -3,7 +3,7 @@
 # 用法: sudo c cloudflare set
 
 # shellcheck disable=SC2034 # consumed by sourced caddy-lib.sh cmd_update
-DEFAULT_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r11}"
+DEFAULT_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r12}"
 DEFAULT_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${DEFAULT_REF}}"
 DEFAULT_UPDATE_URL="${DEFAULT_BASE_URL}/caddy-cloudflare"
 
@@ -85,7 +85,7 @@ _hook_menu_config_items() {
 
 _hook_menu_config_handler() {
     case "$1" in
-        8) require_command caddy; with_global_lock cmd_cloudflare ;;
+        8) require_command caddy; cmd_cloudflare ;;
         *) return 1 ;;
     esac
 }
@@ -97,7 +97,8 @@ _hook_cli_command() {
             require_command caddy
             case "${1:-}" in
                 ""|status|show|check)
-                    with_global_lock cmd_cloudflare "${1:-}"
+                    # Read-only: do not take the global mutation lock.
+                    cmd_cloudflare "${1:-}"
                     ;;
                 set)
                     shift
