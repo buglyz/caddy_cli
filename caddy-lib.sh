@@ -1958,6 +1958,48 @@ format_site_label_for_scheme() {
     printf '%s' "$out"
 }
 
+
+# ---- DNS-01 force helpers (Cloudflare variant reads FORCE_DNS_TLS via hook) ----
+site_file_wants_dns_tls() {
+    local file="$1"
+    [[ -n "$file" && -f "$file" ]] || return 1
+    # Match either multi-line tls { dns cloudflare } or a single-line dns cloudflare directive.
+    grep -Eq 'dns[[:space:]]+cloudflare' "$file" 2>/dev/null
+}
+
+with_dns_tls_flag() {
+    # with_dns_tls_flag <0|1> <command> [args...]
+    local flag="$1"
+    shift
+    local prev="${FORCE_DNS_TLS:-0}"
+    FORCE_DNS_TLS="$flag"
+    local rc=0
+    "$@" || rc=$?
+    FORCE_DNS_TLS="$prev"
+    return "$rc"
+}
+
+resolve_dns_tls_flag() {
+    # resolve_dns_tls_flag <explicit_force 0|1> <scheme> [existing_file]
+    # Prints 0 or 1. HTTP scheme always 0. explicit 1 wins. Else preserve existing file.
+    local explicit="${1:-0}"
+    local scheme="${2:-https}"
+    local file="${3:-}"
+    if [[ "$scheme" == "http" ]]; then
+        printf '0'
+        return 0
+    fi
+    if [[ "$explicit" == "1" ]]; then
+        printf '1'
+        return 0
+    fi
+    if [[ -n "$file" ]] && site_file_wants_dns_tls "$file"; then
+        printf '1'
+        return 0
+    fi
+    printf '0'
+}
+
 emit_site_common_blocks() {
     local emit_tls="${1:-yes}"
     cat <<'EOF'
@@ -2322,12 +2364,14 @@ cmd_add_emby() {
     local scheme_explicit=0
     local prompted=0
     local skip_dns_check=0
+    local force_dns_tls=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --http|--no-ssl) scheme="http"; scheme_explicit=1 ;;
             --https) scheme="https"; scheme_explicit=1 ;;
+            --dns-only) force_dns_tls=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-emby 参数: $1"; return 1 ;;
@@ -2390,7 +2434,9 @@ cmd_add_emby() {
         fi
     fi
 
-    site_block="$(build_emby_site_block "$label" "$target_domain" "$scheme")"
+    local dns_flag
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "")"
+    site_block="$(with_dns_tls_flag "$dns_flag" build_emby_site_block "$label" "$target_domain" "$scheme")"
     ensure_dirs
     if ! write_site_file "$new_file" "$label" "$site_block"; then
         return 1
@@ -2413,12 +2459,14 @@ cmd_add_gateway() {
     local allow_regex=""
     local unsafe_open_proxy=0
     local skip_dns_check=0
+    local force_dns_tls=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-ssl|--http) scheme="http"; scheme_explicit=1 ;;
             --https) scheme="https"; scheme_explicit=1 ;;
+            --dns-only) force_dns_tls=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --allow)
                 shift
@@ -2488,7 +2536,9 @@ cmd_add_gateway() {
         fi
     fi
 
-    site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
+    local dns_flag
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "")"
+    site_block="$(with_dns_tls_flag "$dns_flag" build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     ensure_dirs
     if ! write_site_file "$new_file" "$label" "$site_block"; then
         return 1
@@ -2579,17 +2629,14 @@ cmd_add() {
     fi
     oldbak="$(backup_file_if_exists "$file")"
 
-    # --dns-only: force DNS-01 even if cloudflare_dns_ready check fails
-    FORCE_DNS_TLS="$force_dns_tls"
+    local dns_flag
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
 
     if [[ -n "$path_prefix" ]]; then
-        build_path_proxy_site_block "$label" "$port" "$path_prefix" "$scheme" > "$file"
+        with_dns_tls_flag "$dns_flag" build_path_proxy_site_block "$label" "$port" "$path_prefix" "$scheme" > "$file"
     else
-        build_reverse_proxy_site_block "$label" "$port" "$scheme" > "$file"
+        with_dns_tls_flag "$dns_flag" build_reverse_proxy_site_block "$label" "$port" "$scheme" > "$file"
     fi
-
-    # shellcheck disable=SC2034 # read by Cloudflare variant hook while rendering site TLS
-    FORCE_DNS_TLS=0
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
         fail "已回滚站点修改"
@@ -2611,6 +2658,7 @@ cmd_add_static() {
     local prompted=0
     local spa_mode="off"
     local skip_dns_check=0
+    local force_dns_tls=0
     local -a positional=()
 
     while (( $# > 0 )); do
@@ -2618,6 +2666,7 @@ cmd_add_static() {
             --spa) spa_mode="on" ;;
             --http|--no-ssl) scheme="http"; scheme_explicit=1 ;;
             --https) scheme="https"; scheme_explicit=1 ;;
+            --dns-only) force_dns_tls=1 ;;
             --skip-dns-check) skip_dns_check=1 ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
             --*) fail "未知 add-static 参数: $1"; return 1 ;;
@@ -2667,7 +2716,9 @@ cmd_add_static() {
 
     oldbak="$(backup_file_if_exists "$file")"
 
-    build_static_site_block "$label" "$site_dir" "$spa_mode" "$scheme" > "$file"
+    local dns_flag
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
+    with_dns_tls_flag "$dns_flag" build_static_site_block "$label" "$site_dir" "$spa_mode" "$scheme" > "$file"
 
     if ! write_site_file_with_rollback "$file" "$oldbak"; then
         fail "已回滚站点修改"
@@ -2757,8 +2808,9 @@ cmd_set_emby_file() {
     say "新目标: ${label} → ${new_target}"
     say "当前协议: ${scheme}，如需切换请在 cmd_set 调用时使用 --http / --https"
 
-    local site_block
-    site_block="$(build_emby_site_block "$label" "$new_target" "$scheme")"
+    local site_block dns_flag
+    dns_flag="$(resolve_dns_tls_flag "${CADDYCTL_FORCE_DNS_TLS:-0}" "$scheme" "$file")"
+    site_block="$(with_dns_tls_flag "$dns_flag" build_emby_site_block "$label" "$new_target" "$scheme")"
 
     local oldbak=""
     oldbak="$(backup_file_if_exists "$file")"
@@ -2774,6 +2826,7 @@ cmd_set() {
     local override_path="__keep__"
     local override_scheme=""
     local override_emby_target=""
+    local force_dns_tls=0
     local -a positional=()
 
     while (( $# > 0 )); do
@@ -2793,6 +2846,7 @@ cmd_set() {
                 [[ $# -gt 0 ]] || { fail "--target 需要目标地址参数"; return 1; }
                 override_emby_target="$1"
                 ;;
+            --dns-only) force_dns_tls=1 ;;
             --http) override_scheme="http" ;;
             --https) override_scheme="https" ;;
             --) shift; while (( $# > 0 )); do positional+=("$1"); shift; done; break ;;
@@ -2825,7 +2879,7 @@ cmd_set() {
     fi
 
     if [[ "$site_type" == "Emby反代" ]]; then
-        cmd_set_emby_file "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
+        CADDYCTL_FORCE_DNS_TLS="$force_dns_tls" cmd_set_emby_file "$file" "$site_type" "${label:-}" "$query" "$override_emby_target" "$override_scheme"
         return $?
     fi
     if [[ "$site_type" == "网关" ]]; then
@@ -2878,14 +2932,15 @@ cmd_set() {
         esac
     fi
 
-    local oldbak tmp
+    local oldbak tmp dns_flag
     oldbak="$(backup_file_if_exists "$file")"
     tmp="$(mktemp)"
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
 
     if [[ -n "$path_prefix" ]]; then
-        build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme" > "$tmp"
+        with_dns_tls_flag "$dns_flag" build_path_proxy_site_block "$label" "$TARGET_PORT" "$path_prefix" "$scheme" > "$tmp"
     else
-        build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme" > "$tmp"
+        with_dns_tls_flag "$dns_flag" build_reverse_proxy_site_block "$label" "$TARGET_PORT" "$scheme" > "$tmp"
     fi
     mv "$tmp" "$file"
 
@@ -2940,12 +2995,14 @@ cmd_set_gateway() {
     local allow_seen=0
     local unsafe_seen=0
     local scheme_seen=0
+    local force_dns_tls=0
     local -a positional=()
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --http|--no-ssl) scheme="http"; scheme_seen=1 ;;
             --https) scheme="https"; scheme_seen=1 ;;
+            --dns-only) force_dns_tls=1 ;;
             --allow)
                 shift
                 [[ $# -gt 0 ]] || { fail "--allow 需要 host:port 列表"; return 1; }
@@ -3032,7 +3089,9 @@ cmd_set_gateway() {
         allow_regex="$(gateway_allow_regex "$allow_spec")" || return 1
     fi
 
-    site_block="$(build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
+    local dns_flag
+    dns_flag="$(resolve_dns_tls_flag "$force_dns_tls" "$scheme" "$file")"
+    site_block="$(with_dns_tls_flag "$dns_flag" build_gateway_site_block "$label" "$scheme" "$allow_regex" "$allow_spec")"
     oldbak="$(backup_file_if_exists "$file")"
     printf '%s\n' "$site_block" > "$file"
 
@@ -4116,18 +4175,18 @@ cmd_show_help() {
 站点管理:
   c list
   c add <域名> <本地端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
-  c add-static <域名> <目录> [--http|--https] [--spa] [--skip-dns-check]
-  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https]
+  c add-static <域名> <目录> [--http|--https] [--spa] [--dns-only] [--skip-dns-check]
+  c set <域名> [--port <端口>] [--path <前缀|none>] [--http|--https] [--dns-only]
   c enable <域名>
   c disable <域名>
   c rm <域名>
 
 Emby 管理:
   c list-emby
-  c add-emby <域名> <目标地址> [--http|--https] [--skip-dns-check]
-  c add-gateway <域名> --allow <host:port[,host:port...]> [--http|--https] [--skip-dns-check]
-  c add-gateway <域名> --unsafe-open-proxy [--http|--https] [--skip-dns-check]
-  c set-emby <Emby域名> [--target <地址>] [--http|--https]
+  c add-emby <域名> <目标地址> [--http|--https] [--dns-only] [--skip-dns-check]
+  c add-gateway <域名> --allow <host:port[,host:port...]> [--http|--https] [--dns-only] [--skip-dns-check]
+  c add-gateway <域名> --unsafe-open-proxy [--http|--https] [--dns-only] [--skip-dns-check]
+  c set-emby <Emby域名> [--target <地址>] [--http|--https] [--dns-only]
   c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https]
   c rm-emby <Emby域名或网关域名>
 
@@ -4655,6 +4714,28 @@ main() {
         help|-h|--help)
             cmd_show_help
             return 0
+            ;;
+        cloudflare|cf)
+            case "${2:-}" in
+                ""|status|show|check)
+                    # Read-only Cloudflare status — no root, no mutation lock required.
+                    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+                        ensure_dirs
+                        load_state
+                    else
+                        [[ -r "$STATE_FILE" ]] && load_state
+                    fi
+                    require_command caddy
+                    # Shift is handled inside hook path; call cmd_cloudflare directly if available.
+                    if declare -F cmd_cloudflare >/dev/null 2>&1; then
+                        cmd_cloudflare "${2:-}"
+                    else
+                        fail "当前不是 Cloudflare 版 CLI（缺少 cloudflare 子命令）"
+                        return 1
+                    fi
+                    return 0
+                    ;;
+            esac
             ;;
     esac
 

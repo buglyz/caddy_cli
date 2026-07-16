@@ -154,31 +154,100 @@ test_gateway_uses_full_url_proxy_paths() {
 
 
 test_emby_and_gateway_emit_tls_hook_on_https() {
+    # Mimic caddy-cloudflare: only emit dns tls when FORCE_DNS_TLS=1
     _hook_render_site_tls() {
-        cat <<'EOF'
+        if [[ "${FORCE_DNS_TLS:-0}" == "1" ]]; then
+            cat <<'EOF'
     tls {
         dns cloudflare {env.CLOUDFLARE_API_TOKEN}
     }
 EOF
+        fi
     }
 
     local config
+    # default: no dns tls
     config="$(build_emby_site_block emby.example.com https://upstream.example.com:443 https)"
-    grep -Fq 'tls {' <<<"$config" || fail_test "emby HTTPS site missing TLS hook"
-    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "emby HTTPS site missing cloudflare tls directive"
+    ! grep -Fq 'dns cloudflare' <<<"$config" || fail_test "emby HTTPS default unexpectedly forced DNS-01"
     ! grep -Fq 'encode zstd gzip' <<<"$config" || fail_test "emby site unexpectedly emitted encode"
+
+    config="$(with_dns_tls_flag 1 build_emby_site_block emby.example.com https://upstream.example.com:443 https)"
+    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "emby HTTPS --dns-only missing cloudflare tls"
 
     config="$(build_emby_site_block emby.example.com http://upstream.example.com:8096 http)"
     ! grep -Fq 'tls {' <<<"$config" || fail_test "emby HTTP site unexpectedly emitted TLS hook"
 
-    config="$(build_gateway_site_block gate.example.com https "x" "emby.example.com:443")"
-    grep -Fq 'tls {' <<<"$config" || fail_test "gateway HTTPS site missing TLS hook"
+    config="$(with_dns_tls_flag 1 build_gateway_site_block gate.example.com https "x" "emby.example.com:443")"
+    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "gateway HTTPS --dns-only missing TLS hook"
     grep -Fq 'request_body' <<<"$config" || fail_test "gateway HTTPS site missing request_body"
 
     config="$(build_gateway_site_block gate.example.com http "x" "emby.example.com:443")"
     ! grep -Fq 'tls {' <<<"$config" || fail_test "gateway HTTP site unexpectedly emitted TLS hook"
 
+    config="$(with_dns_tls_flag 1 build_reverse_proxy_site_block app.example.com 3000 https)"
+    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "reverse proxy --dns-only missing tls"
+    config="$(with_dns_tls_flag 1 build_static_site_block static.example.com /srv/www off https)"
+    grep -Fq 'dns cloudflare' <<<"$config" || fail_test "static --dns-only missing tls"
+
     _hook_render_site_tls() { :; }
+}
+
+test_set_preserves_dns_tls_from_existing_file() {
+    _hook_render_site_tls() {
+        if [[ "${FORCE_DNS_TLS:-0}" == "1" ]]; then
+            cat <<'EOF'
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+EOF
+        fi
+    }
+
+    local file="$SITES_DIR/a.example.com.conf"
+    ensure_dirs
+    cat > "$file" <<'EOF'
+a.example.com {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}
+EOF
+
+    APPLY_CONFIG_STATUS=0
+    cmd_set a.example.com --port 4000 >/dev/null 2>&1 || fail_test "cmd_set failed"
+    APPLY_CONFIG_STATUS=1
+
+    grep -Fq 'reverse_proxy 127.0.0.1:4000' "$file" || fail_test "cmd_set did not update port"
+    grep -Fq 'dns cloudflare' "$file" || fail_test "cmd_set dropped existing DNS-01 tls block"
+
+    # HTTP mode should drop dns tls
+    APPLY_CONFIG_STATUS=0
+    cmd_set a.example.com --http >/dev/null 2>&1 || fail_test "cmd_set --http failed"
+    APPLY_CONFIG_STATUS=1
+    ! grep -Fq 'dns cloudflare' "$file" || fail_test "cmd_set --http kept DNS-01 tls"
+
+    # explicit --dns-only re-adds
+    APPLY_CONFIG_STATUS=0
+    cmd_set a.example.com --https --dns-only >/dev/null 2>&1 || fail_test "cmd_set --dns-only failed"
+    APPLY_CONFIG_STATUS=1
+    grep -Fq 'dns cloudflare' "$file" || fail_test "cmd_set --dns-only did not inject tls"
+
+    _hook_render_site_tls() { :; }
+}
+
+test_resolve_dns_tls_flag_logic() {
+    local f="$SITES_DIR/dnsflag.example.com.conf"
+    ensure_dirs
+    printf '%s
+' 'x.example.com { reverse_proxy 127.0.0.1:1 }' > "$f"
+    [[ "$(resolve_dns_tls_flag 0 https "$f")" == "0" ]] || fail_test "expected 0 without existing dns"
+    printf '%s
+' 'x.example.com { tls { dns cloudflare {env.CLOUDFLARE_API_TOKEN} } }' > "$f"
+    [[ "$(resolve_dns_tls_flag 0 https "$f")" == "1" ]] || fail_test "expected preserve existing dns"
+    [[ "$(resolve_dns_tls_flag 1 http "$f")" == "0" ]] || fail_test "http should force 0"
+    [[ "$(resolve_dns_tls_flag 1 https "")" == "1" ]] || fail_test "explicit force should be 1"
 }
 
 
@@ -206,6 +275,8 @@ test_reverse_proxy_builders_support_http_mode
 test_http_multi_label_matching_is_scheme_aware
 test_gateway_uses_full_url_proxy_paths
 test_emby_and_gateway_emit_tls_hook_on_https
+test_set_preserves_dns_tls_from_existing_file
+test_resolve_dns_tls_flag_logic
 test_resolve_lock_file_prefers_writable_dir
 
 printf 'ok - smoke tests passed\n'

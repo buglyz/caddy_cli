@@ -45,6 +45,7 @@ c add-static static.example.com /var/www/site --spa
 c add-static lan-static.example.com /var/www/site --http --skip-dns-check
 c add lan.example.com 3000 --skip-dns-check
 c set example.com --port 4000
+c set example.com --port 4000 --dns-only
 c enable example.com
 c disable example.com
 c rm example.com
@@ -52,6 +53,7 @@ c rm example.com
 # Emby 管理
 c list-emby
 c add-emby emby.example.com https://10.0.0.5:8096
+c add-emby emby.example.com https://10.0.0.5:8096 --dns-only
 c add-emby lan.example.com http://10.0.0.5:8096 --http
 c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
 c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
@@ -93,7 +95,9 @@ c update
 ## Cloudflare DNS 版额外功能
 
 - 配置 Cloudflare API token 后，默认仍走 **HTTP-01 / TLS-ALPN-01**（不会因为存在 token 就全局强制 DNS-01）
-- 需要 DNS-01（泛域名、CF 橙云、80/443 不可达）时显式加：`c add example.com 3000 --dns-only`
+- 需要 DNS-01（泛域名、CF 橙云、80/443 不可达）时显式加 `--dns-only`：
+  `c add` / `add-static` / `add-emby` / `add-gateway` / `set` / `set-emby` / `set-gateway` 均支持
+- `c set` 会保留站点原有的 `tls { dns cloudflare ... }`（HTTP 模式除外）；也可用 `--dns-only` 重新打开
 - `c cloudflare set` — 配置 Cloudflare API token（交互式隐藏输入；脚本环境可通过 stdin 传入）
 - `c cloudflare check` — 检查 Cloudflare DNS-01 就绪状态
 - `c cloudflare remove` — 删除 Cloudflare 配置
