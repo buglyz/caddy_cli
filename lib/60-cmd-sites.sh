@@ -1068,10 +1068,12 @@ cmd_settings_menu() {
     local choice=""
     while true; do
         clear
-        echo "====== 配置设置 ======"
-        echo "1. 设置邮箱"
-        echo "2. 设置服务超时"
-        echo "3. 设置上游检查模式"
+        echo "====== 全局设置 ======"
+        echo ""
+        echo "1. 设置 ACME 邮箱"
+        echo "2. 设置 systemctl 超时（秒）"
+        echo "3. 设置上游健康检查模式（warn / strict）"
+        echo ""
         echo "0. 返回上一级"
         echo "======================"
         read -rp "选择: " choice

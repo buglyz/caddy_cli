@@ -813,96 +813,108 @@ cmd_show_help() {
 用法:
   c <命令> [参数]
 
-站点管理:
+────────────────────────────────
+1) 站点（反代 / 静态）
+────────────────────────────────
   c list
-  c add <域名> <本地端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
+  c add <域名> <端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
   c add-static <域名> <目录> [--http|--https] [--spa] [--dns-only] [--skip-dns-check]
-  c set <域名> [--port|--path|--root|--spa|--no-spa|--http|--https|--dns-only]
+  c set <域名> [--port|--path|--root|--spa|--no-spa|--http|--https|--dns-only|--target]
   c set-static <域名> [--root <目录>] [--spa|--no-spa] [--http|--https] [--dns-only]
-  # set 重建模板时尽量保留自定义指令；网关/Emby 仅保留 header/basicauth/log 白名单
   c enable <域名>
   c disable <域名>
   c rm <域名>
 
-Emby 管理:
+  # set 会重建模板，并尽量保留自定义 header/basicauth/log；
+  # 网关与 Emby 仅保留上述白名单指令。
+
+────────────────────────────────
+2) Emby / 通用网关
+────────────────────────────────
   c list-emby
-  c add-emby <域名> <目标地址> [--http|--https] [--dns-only] [--skip-dns-check]
-  c add-gateway <域名> --allow <host:port[,host:port...]> [--http|--https] [--dns-only] [--skip-dns-check]
-  c add-gateway <域名> --unsafe-open-proxy [--http|--https] [--dns-only] [--skip-dns-check]
-  c set-emby <Emby域名> [--target <地址>] [--http|--https] [--dns-only]
-  c set-gateway <网关域名> [--allow <host:port[,host:port...]>|--unsafe-open-proxy] [--http|--https] [--dns-only]
-  c rm-emby <Emby域名或网关域名>
+  c add-emby <域名> <目标> [--http|--https] [--dns-only] [--skip-dns-check]
+  c set-emby <域名> [--target <地址>] [--http|--https] [--dns-only]
+  c add-gateway <域名> --allow <host:port[,...]> [--http|--https] [--dns-only] [--skip-dns-check]
+  c add-gateway <域名> --unsafe-open-proxy [...]
+  c set-gateway <域名> [--allow ...|--unsafe-open-proxy] [--http|--https] [--dns-only]
+  c rm-emby <域名或网关域名>
 
-添加域名反代时会检查域名 A/AAAA 是否解析到本机 IP。
-内网、测试域名或 Cloudflare 代理场景可加 --skip-dns-check，或设置 CADDYCTL_SKIP_DNS_CHECK=1。
-
-配置与全局设置:
-  c email [邮箱]
-  c import [--merge] [--force] [Caddyfile路径]
-  # 默认替换 sites.d；--merge 合并；非交互覆盖需 --force 或 CADDYCTL_IMPORT_FORCE=1
+────────────────────────────────
+3) 配置与导入
+────────────────────────────────
   c config
   c validate
   c apply
+  c email [邮箱]
   c timeout [秒|default]
   c upstream-mode [warn|strict]
+  c import [--merge] [--force] [Caddyfile路径]
+  # 默认替换 sites.d；--merge 合并保留现有站点；
+  # 非交互覆盖需 --force 或 CADDYCTL_IMPORT_FORCE=1
+
+────────────────────────────────
+4) 服务控制
+────────────────────────────────
+  c start
+  c restart
+  c stop
+  c status
+
+────────────────────────────────
+5) 诊断与备份
+────────────────────────────────
+  c doctor
+  c logs
+  c cert-check <域名>
+  c snapshots [数量|all]
+  c undo [快照ID]
+
+────────────────────────────────
+6) 安装与更新
+────────────────────────────────
+  c install
+  c install-self
+  c update [--binary]    # --binary 同时更新 Release 中的 caddy 可执行文件
+  c menu                 # 交互菜单
+
+说明:
+  · 添加域名反代时会检查 A/AAAA 是否指向本机；内网/测试/橙云可加 --skip-dns-check
+    或设置 CADDYCTL_SKIP_DNS_CHECK=1
+  · 需要 DNS-01（泛域名 / 80 不可达）时加 --dns-only（CF 版）
+  · 别名: ls=list, rm=del=delete, check=validate, reload=apply
+           emby=add-emby, gateway=add-gateway
 EOF
     _hook_help_extra
     cat <<'EOF'
 
-服务控制:
-  c start
-  c restart
-  c stop
+────────────────────────────────
+示例
+────────────────────────────────
+  # 普通站点
+  c add app.example.com 3000
+  c add app.example.com 3000 --path /api --dns-only
+  c add-static www.example.com /var/www/site --spa
+  c set app.example.com --port 4000
+  c set-static www.example.com --root /var/www/new --https
+  c disable app.example.com && c enable app.example.com
 
-诊断与日志:
-  c doctor
-  c status
-  c logs
-  c cert-check <域名>
-
-备份与回滚:
-  c snapshots [数量|all]
-  c undo [快照ID]
-
-安装与更新:
-  c install
-  c install-self
-  c update
-  c menu
-
-（别名: ls=list, rm=del=delete, check=validate, reload=apply, emby=add-emby, gateway=add-gateway）
-示例:
-  # 站点管理
-  c add example.com 3000
-  c add example.com 3000 --path /api
-  c add example.com 3000 --dns-only
-  c add lan.example.com 3000 --skip-dns-check
-  c add-static static.example.com /var/www/site --spa
-  c add-static lan-static.example.com /var/www/site --skip-dns-check
-  c set example.com --port 4000
-  c disable example.com
-  c enable example.com
-
-  # Emby 管理
-  c list-emby
+  # Emby / 网关
   c add-emby emby.example.com https://10.0.0.5:8096
-  c add-emby lan.example.com http://10.0.0.5:8096 --http
-  c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
-  c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
   c set-emby emby.example.com --target https://10.0.0.6:8096
-  c set-gateway gate.example.com --allow 10.0.0.6:8096 --https
+  c add-gateway gate.example.com --allow 10.0.0.5:8096,emby.example.com:443
+  c set-gateway gate.example.com --allow 10.0.0.7:8096
 
-  # 配置与全局设置
-  c timeout 45
-  c upstream-mode strict
-
-  # 诊断与日志
-  c cert-check example.com
-
-  # 备份与更新
-  c snapshots
-  c undo
+  # 导入 / 更新
+  c import --merge /etc/caddy/Caddyfile.bak
+  c import --force /path/to/Caddyfile
   c update
+  c update --binary
+
+  # 诊断
+  c doctor
+  c cert-check app.example.com
+  c snapshots 20
+  c undo
 EOF
 }
 
@@ -1188,6 +1200,7 @@ PY
     say "导入完成"
 }
 
+
 pause_menu() {
     echo
     read -rp "按回车继续..." _
@@ -1200,6 +1213,236 @@ show_menu_header() {
 }
 
 menu_main() {
+    show_menu_header "Caddy CLI 管理面板"
+    echo ""
+    echo "【总览】"
+    echo "1. 查看所有站点"
+    echo "2. 服务状态"
+    echo "3. 实时日志"
+    echo ""
+    echo "【站点】"
+    echo "4. 站点管理（反代 / 静态）"
+    echo "5. Emby / 网关"
+    echo ""
+    echo "【系统】"
+    echo "6. 服务与配置"
+    echo "7. 诊断与备份"
+    echo "8. 安装与更新"
+    echo ""
+    echo "0. 退出"
+    echo "============================"
+}
+
+menu_sites() {
+    show_menu_header "站点管理 · 反代 / 静态"
+    echo ""
+    echo "【查看】"
+    echo "1. 查看所有站点"
+    echo ""
+    echo "【添加】"
+    echo "2. 添加反向代理"
+    echo "3. 添加静态网站"
+    echo ""
+    echo "【修改】"
+    echo "4. 修改站点（set / set-static）"
+    echo "5. 启用 / 禁用站点"
+    echo "6. 删除站点"
+    echo ""
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_emby() {
+    show_menu_header "Emby / 通用网关"
+    echo ""
+    echo "【查看】"
+    echo "1. 查看 Emby 与网关"
+    echo ""
+    echo "【添加】"
+    echo "2. 添加 Emby 固定反代"
+    echo "3. 添加通用反代网关"
+    echo ""
+    echo "【修改】"
+    echo "4. 修改 Emby / 网关"
+    echo "5. 删除 Emby / 网关"
+    echo ""
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_config() {
+    show_menu_header "服务与配置"
+    echo ""
+    echo "【服务】"
+    echo "1. 启动 Caddy"
+    echo "2. 重启 Caddy"
+    echo "3. 停止 Caddy"
+    echo "4. 查看服务状态"
+    echo ""
+    echo "【配置】"
+    echo "5. 查看当前 Caddyfile"
+    echo "6. 校验并应用配置"
+    echo "7. 全局设置（邮箱 / 超时 / 上游）"
+    echo ""
+    echo "【导入】"
+    echo "8. 导入配置（替换 sites.d）"
+    echo "9. 合并导入（--merge）"
+    echo ""
+    _hook_menu_config_items
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_diagnostics() {
+    show_menu_header "诊断与备份"
+    echo ""
+    echo "【诊断】"
+    echo "1. 环境检查（doctor）"
+    echo "2. 查看 Caddy 日志"
+    echo "3. 证书诊断"
+    echo ""
+    echo "【备份回滚】"
+    echo "4. 查看回滚快照"
+    echo "5. 回滚到上一步 / 指定快照"
+    echo ""
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+menu_install() {
+    show_menu_header "安装与更新"
+    echo ""
+    echo "1. 安装 / 初始化 Caddy"
+    echo "2. 安装本机 CLI 命令（install-self）"
+    echo "3. 更新 CLI 脚本与模块"
+    echo "4. 更新 CLI + Caddy 二进制（--binary）"
+    echo ""
+    echo "0. 返回上一级"
+    echo "======================"
+}
+
+interactive_sites_menu() {
+    local choice=""
+    while true; do
+        menu_sites
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_list ;;
+            2) require_command caddy; with_global_lock run_mutation add cmd_add ;;
+            3) require_command caddy; with_global_lock run_mutation add-static cmd_add_static ;;
+            4) require_command caddy; with_global_lock run_mutation set cmd_set ;;
+            5) require_command caddy; with_global_lock run_mutation toggle cmd_toggle_site ;;
+            6) require_command caddy; with_global_lock run_mutation rm cmd_rm ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_emby_menu() {
+    local choice=""
+    while true; do
+        menu_emby
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_list_emby ;;
+            2) require_command caddy; with_global_lock run_mutation add-emby cmd_add_emby ;;
+            3) require_command caddy; with_global_lock run_mutation add-gateway cmd_add_gateway ;;
+            4) require_command caddy; with_global_lock run_mutation set-emby cmd_set_emby ;;
+            5) require_command caddy; with_global_lock run_mutation rm-emby cmd_rm_emby ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_config_menu() {
+    local choice=""
+    while true; do
+        menu_config
+        read -rp "选择: " choice
+        case "$choice" in
+            1) with_global_lock cmd_start ;;
+            2) with_global_lock cmd_restart ;;
+            3) with_global_lock cmd_stop ;;
+            4) cmd_status ;;
+            5) cmd_config ;;
+            6) require_command caddy; with_global_lock run_mutation validate-apply cmd_validate_and_apply ;;
+            7) cmd_settings_menu ;;
+            8) require_command caddy; with_global_lock run_mutation import cmd_import ;;
+            9) require_command caddy; with_global_lock run_mutation import-merge cmd_import --merge ;;
+            0) return 0 ;;
+            *)
+                if _hook_menu_config_handler "$choice"; then
+                    :
+                else
+                    fail "无效输入"
+                fi
+                ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_diagnostics_menu() {
+    local choice=""
+    while true; do
+        menu_diagnostics
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_doctor ;;
+            2) cmd_logs ;;
+            3) cmd_cert_check ;;
+            4) cmd_snapshots ;;
+            5) require_command caddy; with_global_lock cmd_undo ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_install_menu() {
+    local choice=""
+    while true; do
+        menu_install
+        read -rp "选择: " choice
+        case "$choice" in
+            1) with_global_lock cmd_install ;;
+            2) with_global_lock cmd_install_self ;;
+            3) with_global_lock cmd_update ;;
+            4) with_global_lock cmd_update --binary ;;
+            0) return 0 ;;
+            *) fail "无效输入" ;;
+        esac
+        pause_menu
+    done
+}
+
+interactive_menu() {
+    local choice=""
+    while true; do
+        menu_main
+        read -rp "选择: " choice
+        case "$choice" in
+            1) cmd_list; pause_menu ;;
+            2) cmd_status; pause_menu ;;
+            3) cmd_logs; pause_menu ;;
+            4) interactive_sites_menu ;;
+            5) interactive_emby_menu ;;
+            6) interactive_config_menu ;;
+            7) interactive_diagnostics_menu ;;
+            8) interactive_install_menu ;;
+            0) exit 0 ;;
+            *) fail "无效输入"; pause_menu ;;
+        esac
+    done
+}
+
+
+main() {
     show_menu_header "Caddy CLI 管理面板"
     echo ""
     echo "【快速操作】"
