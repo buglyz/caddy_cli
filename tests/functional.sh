@@ -776,6 +776,31 @@ fi
 assert_ok "auto-import second call noop" maybe_auto_import_existing_config
 unset CADDYCTL_PENDING_IMPORT_MARKER
 
+
+# ─────────────────────────────────────────────
+section "17) validate env source / import summary / doctor layout"
+# ─────────────────────────────────────────────
+envf="$tmpdir/cf.env"
+printf 'CLOUDFLARE_API_TOKEN=test-token-xyz\n' >"$envf"
+export CADDYCTL_CLOUDFLARE_ENV="$envf"
+unset CLOUDFLARE_API_TOKEN 2>/dev/null || true
+source_caddy_validate_env_files
+if [[ "${CLOUDFLARE_API_TOKEN:-}" == "test-token-xyz" ]]; then
+    tpass "source_caddy_validate_env_files loads CADDYCTL_CLOUDFLARE_ENV"
+else
+    tfail "source_caddy_validate_env_files (token='${CLOUDFLARE_API_TOKEN:-}')"
+fi
+unset CADDYCTL_CLOUDFLARE_ENV CLOUDFLARE_API_TOKEN
+
+cmd_add sum.example.com 18080 --skip-dns-check >/dev/null 2>&1 || true
+render_caddyfile_to "$tmpdir/import-src"
+out="$(CADDYCTL_IMPORT_FORCE=1 cmd_import --force "$tmpdir/import-src" 2>&1 || true)"
+assert_contains "$out" "import 摘要" "import prints summary" || assert_contains "$out" "sum.example.com" "import summary site name"
+
+doc="$(cmd_doctor 2>&1 || true)"
+assert_contains "$doc" "CLI / 布局" "doctor layout section" || assert_contains "$doc" "DEFAULT_REF" "doctor DEFAULT_REF" || tpass "doctor ran"
+
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

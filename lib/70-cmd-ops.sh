@@ -398,6 +398,56 @@ cmd_doctor() {
     done
 
     echo
+    echo "===== CLI / 布局 ====="
+    if [[ -n "${DEFAULT_REF:-}" ]]; then
+        echo "[INFO] DEFAULT_REF=${DEFAULT_REF}"
+        case "${DEFAULT_REF}" in
+            *cloudflare-r9*|*cloudflare-r10*|*cloudflare-r7*|*cloudflare-r8*)
+                echo "[WARN] DEFAULT_REF 较旧（r10 及更早可能缺 lib/ 模块）。建议: c update --ref main 或重装 install 脚本"
+                ;;
+            *cloudflare-r11*|*cloudflare-r12*|*cloudflare-r13*)
+                echo "[INFO] 默认 ref 已含模块化 lib/；建议升级到 r14+（validate env / doctor 布局 / auto-import）"
+                ;;
+            *cloudflare-r14*)
+                echo "[OK] DEFAULT_REF 为 r14+（含 P0/P1 修复）"
+                ;;
+        esac
+    else
+        echo "[INFO] DEFAULT_REF 未设置（可能直接 source 库）"
+    fi
+    local pending_marker="${CADDYCTL_PENDING_IMPORT_MARKER:-/etc/caddy/.caddyctl-pending-import}"
+    if [[ -f "$pending_marker" ]]; then
+        echo "[WARN] 存在首次导入标记: $pending_marker（下次 root 运行 c 将尝试 auto-import）"
+        echo "       跳过: CADDYCTL_SKIP_AUTO_IMPORT=1；双写/内联 Caddyfile 主机建议跳过"
+    fi
+    if [[ -f "${pending_marker}.failed" ]]; then
+        echo "[WARN] 自动导入曾失败: ${pending_marker}.failed"
+        echo "       手动: c import --force $CADDYFILE  或  rm -f ${pending_marker}.failed"
+    fi
+    if [[ -f "$CADDYFILE" ]]; then
+        if grep -Eq '^[[:space:]]*import[[:space:]]+.*sites\.d' "$CADDYFILE" 2>/dev/null \
+            || grep -Fq 'import /etc/caddy/sites.d' "$CADDYFILE" 2>/dev/null; then
+            echo "[OK] Caddyfile 含 import sites.d（标准 managed 布局）"
+        else
+            local _inline_sites=0
+            if grep -Eq '^[^#{}[:space:]][^#{]*\{' "$CADDYFILE" 2>/dev/null; then
+                _inline_sites=1
+            fi
+            shopt -s nullglob
+            local _sd=("$SITES_DIR"/*.conf)
+            shopt -u nullglob
+            if (( ${#_sd[@]} > 0 && _inline_sites )); then
+                echo "[WARN] 疑似 dual-write：sites.d 有站点且主 Caddyfile 为内联块（无 import sites.d）"
+                echo "       仅改 sites.d 可能无效；auto-import 会按 import 布局重写主文件，双写主机请设 CADDYCTL_SKIP_AUTO_IMPORT=1"
+            elif (( _inline_sites )); then
+                echo "[INFO] 主 Caddyfile 为内联站点块（非 import sites.d）"
+            else
+                echo "[INFO] 未识别到 import sites.d 与典型站点块"
+            fi
+        fi
+    fi
+
+    echo
     echo "===== Caddyfile 校验 ====="
     if [[ -f "$CADDYFILE" ]]; then
         echo "[OK] 找到 $CADDYFILE"
@@ -512,7 +562,7 @@ cmd_update() {
             --binary|--with-binary) update_binary=1 ;;
             --ref)
                 shift
-                [[ $# -gt 0 ]] || { fail "--ref 需要版本/tag/分支，例如 v2.11.3-cloudflare-r13 或 main"; return 1; }
+                [[ $# -gt 0 ]] || { fail "--ref 需要版本/tag/分支，例如 v2.11.3-cloudflare-r14 或 main"; return 1; }
                 update_ref="$1"
                 ;;
             --ref=*)
@@ -1011,6 +1061,36 @@ cmd_import() {
     local _existing=("$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled "$GLOBALS_DIR"/*.inc)
     existing_count=${#_existing[@]}
     shopt -u nullglob
+    # Non-interactive summary of what will be affected (sites.d labels).
+    if (( existing_count > 0 )); then
+        say "import 摘要（当前 managed 配置）:"
+        shopt -s nullglob
+        local _sf
+        for _sf in "$SITES_DIR"/*.conf "$SITES_DIR"/*.conf.disabled; do
+            [[ -e "$_sf" ]] || continue
+            local _bn _st _label
+            _bn="$(basename "$_sf")"
+            if [[ "$_bn" == *.conf.disabled ]]; then
+                _label="${_bn%.conf.disabled}"
+                _st="禁用"
+            else
+                _label="${_bn%.conf}"
+                _st="启用"
+            fi
+            say "  - 站点: ${_label}  [${_st}]  (${_bn})"
+        done
+        for _sf in "$GLOBALS_DIR"/*.inc; do
+            [[ -e "$_sf" ]] || continue
+            say "  - 全局: $(basename "$_sf")"
+        done
+        shopt -u nullglob
+        if (( merge_mode == 0 )); then
+            say "模式: 覆盖（将清空 sites.d/globals.d 后写入导入结果）"
+        else
+            say "模式: 合并（保留现有，导入块覆盖同名）"
+        fi
+    fi
+
     if (( existing_count > 0 && merge_mode == 0 )); then
         say "警告: import 会清空并替换现有站点/全局片段（当前约 ${existing_count} 个文件）。"
         say "提示: 使用 --merge 可在保留现有站点的前提下合并导入。"
@@ -1025,7 +1105,8 @@ cmd_import() {
                 return 1
             fi
         else
-            say "强制覆盖模式：跳过确认，继续导入。"
+            # force_mode set by --force or CADDYCTL_IMPORT_FORCE
+            say "强制覆盖模式（force=${force_mode}）：跳过确认，继续导入。"
         fi
     fi
     if (( merge_mode == 1 )); then
@@ -1562,6 +1643,8 @@ maybe_auto_import_existing_config() {
     say "首次运行：正在导入安装前已有的 Caddyfile → sites.d ..."
     say "  源: $CADDYFILE"
     say "  跳过: CADDYCTL_SKIP_AUTO_IMPORT=1"
+    say "  注意: 导入后主 Caddyfile 将由 sites.d 重新生成（标准 managed 布局）。"
+    say "        若你依赖「主文件内联 + sites.d 双写」请取消: rm -f $marker 或 CADDYCTL_SKIP_AUTO_IMPORT=1"
 
     # Non-interactive force replace (sites.d empty). Use subshell-safe env.
     if CADDYCTL_IMPORT_FORCE=1 cmd_import --force "$CADDYFILE"; then

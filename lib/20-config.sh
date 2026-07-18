@@ -58,6 +58,31 @@ render_caddyfile_to() {
     } > "$target"
 }
 
+# Source Cloudflare (or other) env files so CLI validate sees the same vars as systemd EnvironmentFile.
+# Safe no-op when files are missing. Prefer explicit hook path, then CADDYCTL_CLOUDFLARE_ENV, then default.
+source_caddy_validate_env_files() {
+    # Priority (first match wins): CADDYCTL_CLOUDFLARE_ENV → CLOUDFLARE_ENV_FILE (CF frontend) → default path.
+    # Only one file is sourced so production /etc does not clobber explicit test/override paths.
+    local f
+    local -a candidates=()
+    if [[ -n "${CADDYCTL_CLOUDFLARE_ENV:-}" ]]; then
+        candidates+=("$CADDYCTL_CLOUDFLARE_ENV")
+    fi
+    if [[ -n "${CLOUDFLARE_ENV_FILE:-}" ]]; then
+        candidates+=("$CLOUDFLARE_ENV_FILE")
+    fi
+    candidates+=("/etc/caddy/cloudflare.env")
+    for f in "${candidates[@]}"; do
+        [[ -n "$f" && -f "$f" && -r "$f" ]] || continue
+        set -a
+        # shellcheck disable=SC1090 # runtime env path
+        source "$f" 2>/dev/null || true
+        set +a
+        return 0
+    done
+    return 0
+}
+
 validate_config_file() {
     local config_path="$1"
     local caddy_bin
@@ -68,21 +93,16 @@ validate_config_file() {
     LAST_VALIDATE_LOG="$(mktemp /tmp/caddyctl-validate.XXXXXX)"
     local _validate_extra_args
     _validate_extra_args="$(_hook_validate_args)"
-    # Caddy < 2.7 doesn't support --envfile; source env inline
+    # Always source env first: systemd EnvironmentFile is invisible to bare `caddy validate`.
+    # Covers DNS-01 sites with {env.CLOUDFLARE_API_TOKEN} even when --envfile is unsupported/unused.
+    source_caddy_validate_env_files
+    # Caddy < 2.7 doesn't support --envfile; strip hook flag after sourcing above.
     local _caddy_ver
     _caddy_ver="$("$caddy_bin" version 2>/dev/null | sed -n 's/^v\?\([0-9]\{1,\}\)\.\([0-9]\{1,\}\).*/\1.\2/p' | head -1 || true)"
     if [[ -n "$_caddy_ver" ]] && caddy_supports_envfile "$_caddy_ver"; then
         :
     else
         if [[ "$_validate_extra_args" == *--envfile* ]]; then
-            local _envf
-            _envf="$(echo "$_validate_extra_args" | sed -n 's/.*--envfile *\([^ ]*\).*/\1/p')"
-            if [[ -f "$_envf" ]]; then
-                set -a
-                # shellcheck disable=SC1090 # env file path is discovered from validated hook args
-                source "$_envf" 2>/dev/null || true
-                set +a
-            fi
             _validate_extra_args=""
         fi
     fi
