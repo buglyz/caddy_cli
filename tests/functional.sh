@@ -801,6 +801,100 @@ doc="$(cmd_doctor 2>&1 || true)"
 assert_contains "$doc" "CLI / 布局" "doctor layout section" || assert_contains "$doc" "DEFAULT_REF" "doctor DEFAULT_REF" || tpass "doctor ran"
 
 
+
+# ─────────────────────────────────────────────
+section "18) dual-write auto-import / disabled duplicate / env priority"
+# ─────────────────────────────────────────────
+
+# env priority: CADDYCTL wins over CLOUDFLARE_ENV_FILE over default
+env_a="$tmpdir/cf-a.env"
+env_b="$tmpdir/cf-b.env"
+printf 'CLOUDFLARE_API_TOKEN=token-A\n' >"$env_a"
+printf 'CLOUDFLARE_API_TOKEN=token-B\n' >"$env_b"
+export CADDYCTL_CLOUDFLARE_ENV="$env_a"
+export CLOUDFLARE_ENV_FILE="$env_b"
+unset CLOUDFLARE_API_TOKEN 2>/dev/null || true
+source_caddy_validate_env_files
+if [[ "${CLOUDFLARE_API_TOKEN:-}" == "token-A" ]]; then
+    tpass "env priority: CADDYCTL_CLOUDFLARE_ENV first"
+else
+    tfail "env priority CADDYCTL (got=${CLOUDFLARE_API_TOKEN:-})"
+fi
+unset CADDYCTL_CLOUDFLARE_ENV
+export CLOUDFLARE_ENV_FILE="$env_b"
+unset CLOUDFLARE_API_TOKEN 2>/dev/null || true
+source_caddy_validate_env_files
+if [[ "${CLOUDFLARE_API_TOKEN:-}" == "token-B" ]]; then
+    tpass "env priority: CLOUDFLARE_ENV_FILE second"
+else
+    tfail "env priority CLOUDFLARE_ENV_FILE (got=${CLOUDFLARE_API_TOKEN:-})"
+fi
+unset CLOUDFLARE_ENV_FILE CLOUDFLARE_API_TOKEN
+
+# cmd_add rejects existing .disabled
+rm -f "$SITES_DIR"/disdup.example.com.conf "$SITES_DIR"/disdup.example.com.conf.disabled 2>/dev/null || true
+cat >"$SITES_DIR/disdup.example.com.conf.disabled" <<'EOF'
+disdup.example.com {
+    reverse_proxy 127.0.0.1:1
+}
+EOF
+assert_fail "cmd_add rejects .disabled site" cmd_add disdup.example.com 3000 --skip-dns-check
+assert_fail "cmd_add_static rejects .disabled" cmd_add_static disdup.example.com /tmp --skip-dns-check
+rm -f "$SITES_DIR/disdup.example.com.conf.disabled"
+
+# dual-write: pending marker + non-empty sites.d + inline Caddyfile → cancel, keep sites
+marker="$tmpdir/.pending-dualwrite"
+export CADDYCTL_PENDING_IMPORT_MARKER="$marker"
+# ensure at least one site exists
+cmd_add dualkeep.example.com 17001 --skip-dns-check >/dev/null 2>&1 || true
+# inline main that would import-wipe if forced
+cat >"$CADDYFILE" <<'EOF'
+inline-only.example.com {
+    reverse_proxy 127.0.0.1:1
+}
+EOF
+: >"$marker"
+out="$(maybe_auto_import_existing_config 2>&1 || true)"
+if [[ ! -f "$marker" ]]; then
+    tpass "dual-write: pending marker cleared without force import"
+else
+    tfail "dual-write: marker still present"
+fi
+assert_contains "$out" "sites.d 已有" "dual-write cancel message" || assert_contains "$out" "取消自动导入" "dual-write cancel phrase"
+if find_site_file dualkeep.example.com >/dev/null 2>&1; then
+    tpass "dual-write: existing sites.d site preserved"
+else
+    tfail "dual-write: dualkeep site missing after cancel"
+fi
+# should NOT have imported inline-only into sites.d
+if find_site_file inline-only.example.com >/dev/null 2>&1; then
+    tfail "dual-write: should not import inline-only when sites.d non-empty"
+else
+    tpass "dual-write: did not import inline-only"
+fi
+unset CADDYCTL_PENDING_IMPORT_MARKER
+
+# doctor reports dual-write when main is inline and sites.d non-empty
+cat >"$CADDYFILE" <<'EOF'
+# no import
+drift.example.com {
+    reverse_proxy 127.0.0.1:9999
+}
+EOF
+# put a sites.d conf that differs (TLS + different port line)
+cat >"$SITES_DIR/drift.example.com.conf" <<'EOF'
+drift.example.com {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+    reverse_proxy 127.0.0.1:8888
+}
+EOF
+doc="$(cmd_doctor 2>&1 || true)"
+assert_contains "$doc" "dual-write" "doctor dual-write warn" || assert_contains "$doc" "内联" "doctor inline note"
+assert_contains "$doc" "漂移" "doctor sample drift" || assert_contains "$doc" "sites.d" "doctor mentions sites.d"
+
+
 section "RESULT"
 # ─────────────────────────────────────────────
 total=$((PASS + FAIL + SKIP))

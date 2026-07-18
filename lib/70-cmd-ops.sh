@@ -409,7 +409,10 @@ cmd_doctor() {
                 echo "[INFO] 默认 ref 已含模块化 lib/；建议升级到 r14+（validate env / doctor 布局 / auto-import）"
                 ;;
             *cloudflare-r14*)
-                echo "[OK] DEFAULT_REF 为 r14+（含 P0/P1 修复）"
+                echo "[INFO] r14 可用；建议 r15+（dual-write 漂移抽样 / 测试加固）"
+                ;;
+            *cloudflare-r15*)
+                echo "[OK] DEFAULT_REF 为 r15+（dual-write 测试与 doctor 漂移）"
                 ;;
         esac
     else
@@ -439,6 +442,36 @@ cmd_doctor() {
             if (( ${#_sd[@]} > 0 && _inline_sites )); then
                 echo "[WARN] 疑似 dual-write：sites.d 有站点且主 Caddyfile 为内联块（无 import sites.d）"
                 echo "       仅改 sites.d 可能无效；auto-import 会按 import 布局重写主文件，双写主机请设 CADDYCTL_SKIP_AUTO_IMPORT=1"
+                # Sample drift: up to 5 sites.d labels whose conf body is not fully present in main Caddyfile
+                local _drift=0 _sf _bn _label _sample=0
+                for _sf in "${_sd[@]}"; do
+                    (( _sample >= 5 )) && break
+                    _bn="$(basename "$_sf")"
+                    _label="${_bn%.conf}"
+                    # If main lacks the label as a site opener, or lacks a distinctive reverse_proxy line from conf
+                    if ! grep -Eq "^[[:space:]]*(https?://)?${_label//./\\.}([[:space:],{]|$)" "$CADDYFILE" 2>/dev/null; then
+                        echo "       [漂移] sites.d 有 ${_label}，主 Caddyfile 未见同名站点行"
+                        _drift=1
+                        _sample=$((_sample + 1))
+                        continue
+                    fi
+                    local _rp
+                    _rp="$(grep -E '[[:space:]]reverse_proxy[[:space:]]' "$_sf" 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')"
+                    if [[ -n "$_rp" ]] && ! grep -Fq "$_rp" "$CADDYFILE" 2>/dev/null; then
+                        echo "       [漂移] ${_label}: sites.d 含「${_rp}」，主文件未匹配该行（主文件为准）"
+                        _drift=1
+                        _sample=$((_sample + 1))
+                    fi
+                    local _tls
+                    if grep -q 'dns cloudflare' "$_sf" 2>/dev/null && ! grep -A20 -E "^[[:space:]]*(https?://)?${_label//./\\.}" "$CADDYFILE" 2>/dev/null | grep -q 'dns cloudflare'; then
+                        echo "       [漂移] ${_label}: sites.d 有 dns cloudflare，主文件对应块未见（TLS 策略可能不一致）"
+                        _drift=1
+                        _sample=$((_sample + 1))
+                    fi
+                done
+                if (( _drift == 0 )); then
+                    echo "       [INFO] 抽样未发现明显 reverse_proxy/TLS 漂移（仍以主文件为生效源）"
+                fi
             elif (( _inline_sites )); then
                 echo "[INFO] 主 Caddyfile 为内联站点块（非 import sites.d）"
             else
@@ -562,7 +595,7 @@ cmd_update() {
             --binary|--with-binary) update_binary=1 ;;
             --ref)
                 shift
-                [[ $# -gt 0 ]] || { fail "--ref 需要版本/tag/分支，例如 v2.11.3-cloudflare-r14 或 main"; return 1; }
+                [[ $# -gt 0 ]] || { fail "--ref 需要版本/tag/分支，例如 v2.11.3-cloudflare-r15 或 main"; return 1; }
                 update_ref="$1"
                 ;;
             --ref=*)
@@ -762,7 +795,7 @@ update_caddy_binary_from_release() {
     require_command curl
     require_command sha256sum
 
-    local ref tag asset_url checksums_url tmp expected actual target
+    local ref tag asset_url checksums_url tmp target
     ref="${CADDY_CLI_REF:-${DEFAULT_REF:-main}}"
     tag="$ref"
     # Prefer explicit override, else GitHub release asset for this tag.

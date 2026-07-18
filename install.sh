@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r14}"
+readonly CADDY_CLI_REF="${CADDY_CLI_REF:-v2.11.3-cloudflare-r15}"
 readonly CADDY_CLI_BASE_URL="${CADDY_CLI_BASE_URL:-https://raw.githubusercontent.com/buglyz/caddy_cli/${CADDY_CLI_REF}}"
 readonly CLI_URL="${CADDY_CLI_URL:-${CADDY_CLI_BASE_URL}/caddy.sh}"
 readonly LIB_URL="${CADDY_LIB_URL:-${CADDY_CLI_BASE_URL}/caddy-lib.sh}"
@@ -273,14 +273,13 @@ enable_and_restart_service_alpine() {
 # Backup existing Caddy configuration before any install changes.
 # Never overwrites previous backups; uses timestamped directory under /etc/caddy/backup.
 backup_existing_caddy_config() {
-    # Only once per installer process.
+    # Only once per installer process. No positional args (shellcheck SC2120).
     if [[ "${_CADDY_CLI_PREINSTALL_BACKUP_DONE:-0}" == "1" ]]; then
         return 0
     fi
     _CADDY_CLI_PREINSTALL_BACKUP_DONE=1
 
-    local step="${1:-}"
-    local prefix="${step:+[$step] }"
+    local prefix=""
     local src_root="/etc/caddy"
     local stamp bak_dir
     local -a items=()
