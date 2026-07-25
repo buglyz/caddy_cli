@@ -242,6 +242,11 @@ cmd_undo() {
         fi
     fi
 
+    if ! validate_snapshot "$snapshot_path"; then
+        fail "快照结构或 manifest 不完整: $(basename "$snapshot_path")"
+        return 1
+    fi
+
     guard_snapshot="$(create_snapshot "undo-guard")" || {
         fail "创建回滚保护快照失败"
         return 1

@@ -12,11 +12,14 @@ trap 'rm -rf "$tmpdir"' EXIT
 CADDYFILE="$tmpdir/Caddyfile"
 SITES_DIR="$tmpdir/sites.d"
 GLOBALS_DIR="$tmpdir/globals.d"
+# shellcheck disable=SC2034 # consumed by sourced state helpers
 STATE_FILE="$tmpdir/caddyctl.conf"
 BACKUP_DIR="$tmpdir/backup"
 SNAPSHOT_DIR="$BACKUP_DIR/snapshots"
+# shellcheck disable=SC2034 # consumed by sourced directory helpers
 ACCESS_LOG_DIR="$tmpdir/log"
 LOCK_FILE="$tmpdir/caddyctl.lock"
+LOCK_FILE_CANDIDATES=("$LOCK_FILE")
 
 fail_test() {
     printf 'not ok - %s\n' "$*" >&2
@@ -155,6 +158,7 @@ test_gateway_uses_full_url_proxy_paths() {
 
 test_emby_and_gateway_emit_tls_hook_on_https() {
     # Mimic caddy-cloudflare: only emit dns tls when FORCE_DNS_TLS=1
+    # shellcheck disable=SC2317 # hook is invoked indirectly by site builders
     _hook_render_site_tls() {
         if [[ "${FORCE_DNS_TLS:-0}" == "1" ]]; then
             cat <<'EOF'
@@ -189,10 +193,12 @@ EOF
     config="$(with_dns_tls_flag 1 build_static_site_block static.example.com /srv/www off https)"
     grep -Fq 'dns cloudflare' <<<"$config" || fail_test "static --dns-only missing tls"
 
+    # shellcheck disable=SC2317 # hook is invoked indirectly by site builders
     _hook_render_site_tls() { :; }
 }
 
 test_set_preserves_dns_tls_from_existing_file() {
+    # shellcheck disable=SC2317 # hook is invoked indirectly by site builders
     _hook_render_site_tls() {
         if [[ "${FORCE_DNS_TLS:-0}" == "1" ]]; then
             cat <<'EOF'
@@ -266,6 +272,102 @@ test_resolve_lock_file_prefers_writable_dir() {
     LOCK_FILE="$old_lock"
 }
 
+test_inline_only_live_config_blocks_mutation() {
+    local managed="$SITES_DIR/managed.example.com.conf"
+    local before snapshot_count
+
+    ensure_dirs
+    mkdir -p "$SNAPSHOT_DIR"
+    clear_managed_dir "$SITES_DIR"
+    clear_managed_dir "$GLOBALS_DIR"
+    printf '%s\n' 'managed.example.com {' '    reverse_proxy 127.0.0.1:8080' '}' >"$managed"
+    render_caddyfile_to "$CADDYFILE"
+    run_mutation managed-layout true >/dev/null 2>&1 \
+        || fail_test "normal managed layout was rejected"
+    printf '%s\n' 'inline-only.example.com {' '    reverse_proxy 127.0.0.1:9090' '}' >>"$CADDYFILE"
+    run_mutation import true >/dev/null 2>&1 \
+        || fail_test "explicit import migration was rejected"
+    before="$(cat "$CADDYFILE")"
+    snapshot_count="$(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+
+    if run_mutation add true >/dev/null 2>&1; then
+        fail_test "inline-only live config did not block mutation"
+    fi
+    assert_file_equals "$CADDYFILE" "$before"
+    [[ "$(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)" == "$snapshot_count" ]] \
+        || fail_test "blocked mutation created a snapshot"
+}
+
+test_symlink_lock_does_not_truncate_target() {
+    local old_candidates=("${LOCK_FILE_CANDIDATES[@]}")
+    local old_lock="$LOCK_FILE"
+    local lock_dir="$tmpdir/symlink-lock" target="$tmpdir/lock-target"
+
+    mkdir -p "$lock_dir"
+    printf '%s' 'keep-this-content' >"$target"
+    ln -s "$target" "$lock_dir/caddyctl.lock"
+    LOCK_FILE_CANDIDATES=("$lock_dir/caddyctl.lock")
+    if with_global_lock true >/dev/null 2>&1; then
+        fail_test "symlink lock path was accepted"
+    fi
+    assert_file_equals "$target" 'keep-this-content'
+    LOCK_FILE_CANDIDATES=("${old_candidates[@]}")
+    LOCK_FILE="$old_lock"
+}
+
+test_incomplete_snapshot_preserves_live_config() {
+    local incomplete="$SNAPSHOT_DIR/incomplete"
+    local live_site="$SITES_DIR/live.example.com.conf"
+
+    ensure_dirs
+    clear_managed_dir "$SITES_DIR"
+    printf '%s\n' 'live.example.com {' '    reverse_proxy 127.0.0.1:7070' '}' >"$live_site"
+    mkdir -p "$incomplete/sites" "$incomplete/globals"
+    printf '%s\n' 'ACTION=broken' >"$incomplete/meta"
+
+    if restore_snapshot_contents "$incomplete" >/dev/null 2>&1; then
+        fail_test "incomplete snapshot was accepted"
+    fi
+    assert_file_equals "$live_site" $'live.example.com {\n    reverse_proxy 127.0.0.1:7070\n}'
+}
+
+test_snapshot_copy_failure_preserves_live_config() {
+    local live_site="$SITES_DIR/copy-failure.example.com.conf"
+    local snapshot
+
+    ensure_dirs
+    clear_managed_dir "$SITES_DIR"
+    clear_managed_dir "$GLOBALS_DIR"
+    printf '%s\n' 'copy-failure.example.com {' '    respond "snapshot"' '}' >"$live_site"
+    render_caddyfile_to "$CADDYFILE"
+    snapshot="$(create_snapshot copy-failure)" || fail_test "could not create copy-failure snapshot"
+    printf '%s\n' 'copy-failure.example.com {' '    respond "live"' '}' >"$live_site"
+
+    # shellcheck disable=SC2317 # cp is invoked indirectly by restore_snapshot_contents
+    if (cp() { return 1; }; restore_snapshot_contents "$snapshot") >/dev/null 2>&1; then
+        fail_test "snapshot restore ignored copy failure"
+    fi
+    assert_file_equals "$live_site" $'copy-failure.example.com {\n    respond "live"\n}'
+}
+
+test_legacy_snapshot_remains_restorable() {
+    local legacy="$SNAPSHOT_DIR/legacy"
+    local live_site="$SITES_DIR/legacy.example.com.conf"
+
+    ensure_dirs
+    clear_managed_dir "$SITES_DIR"
+    clear_managed_dir "$GLOBALS_DIR"
+    mkdir -p "$legacy/sites" "$legacy/globals"
+    printf '%s\n' 'ACTION=legacy' 'CREATED_AT=unknown' >"$legacy/meta"
+    cp -a "$STATE_FILE" "$legacy/state.conf"
+    printf '%s\n' 'legacy.example.com {' '    respond "snapshot"' '}' >"$legacy/sites/legacy.example.com.conf"
+    printf '%s\n' 'legacy.example.com {' '    respond "live"' '}' >"$live_site"
+
+    restore_snapshot_contents "$legacy" >/dev/null 2>&1 \
+        || fail_test "valid legacy snapshot was rejected"
+    assert_file_equals "$live_site" $'legacy.example.com {\n    respond "snapshot"\n}'
+}
+
 
 test_modules_array_safe_under_set_u() {
     # cmd_update must not crash when _CADDYCTL_MODULES is unset under set -u
@@ -295,6 +397,11 @@ test_emby_and_gateway_emit_tls_hook_on_https
 test_set_preserves_dns_tls_from_existing_file
 test_resolve_dns_tls_flag_logic
 test_resolve_lock_file_prefers_writable_dir
+test_inline_only_live_config_blocks_mutation
+test_symlink_lock_does_not_truncate_target
+test_incomplete_snapshot_preserves_live_config
+test_snapshot_copy_failure_preserves_live_config
+test_legacy_snapshot_remains_restorable
 test_modules_array_safe_under_set_u
 
 printf 'ok - smoke tests passed\n'

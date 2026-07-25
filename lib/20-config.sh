@@ -58,6 +58,30 @@ render_caddyfile_to() {
     } > "$target"
 }
 
+assert_live_config_owned() {
+    local rendered
+
+    [[ -s "$CADDYFILE" ]] || return 0
+    rendered="$(mktemp)" || {
+        fail "无法创建配置所有权检查临时文件"
+        return 1
+    }
+    if ! render_caddyfile_to "$rendered"; then
+        cleanup_paths "$rendered"
+        fail "无法渲染 managed 配置，已拒绝覆盖 live Caddyfile"
+        return 1
+    fi
+    if cmp -s "$CADDYFILE" "$rendered"; then
+        cleanup_paths "$rendered"
+        return 0
+    fi
+
+    cleanup_paths "$rendered"
+    fail "live Caddyfile 与 sites.d/globals.d 的 managed 渲染不一致，已拒绝覆盖。"
+    fail "可能存在 inline-only/未知站点或配置漂移；请先执行 c import --merge $CADDYFILE 完成显式迁移。"
+    return 1
+}
+
 # Source Cloudflare (or other) env files so CLI validate sees the same vars as systemd EnvironmentFile.
 # Safe no-op when files are missing. Prefer explicit hook path, then CADDYCTL_CLOUDFLARE_ENV, then default.
 source_caddy_validate_env_files() {
