@@ -19,6 +19,70 @@ func TestEmptyCommandAndMenuOpenInteractivePanel(t *testing.T) {
 	}
 }
 
+func TestMenuDoesNotClearNonTerminalOutput(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	app, out, _ := newTestApp(t, "0\n")
+	runOK(t, app)
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatalf("non-terminal menu output contains ANSI controls: %q", out.String())
+	}
+}
+
+func TestInteractiveTerminalRejectsUnsupportedOutput(t *testing.T) {
+	for _, term := range []string{"", "dumb", "DUMB"} {
+		t.Run(term, func(t *testing.T) {
+			t.Setenv("TERM", term)
+			if interactiveTerminal(os.Stdin, os.Stdout) {
+				t.Fatalf("TERM=%q was treated as an interactive terminal", term)
+			}
+		})
+	}
+}
+
+func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
+	input := strings.Join([]string{
+		"1", "4", "0", "0",
+		"2", "4", "0", "0",
+		"4", "0",
+		"7", "7", "0", "8", "0", "0",
+		"8", "0",
+		"9", "0",
+		"0",
+	}, "\n") + "\n"
+	app, out, _ := newTestApp(t, input)
+	app.Cloudflare = true
+	app.interactive = true
+	runOK(t, app)
+
+	for _, title := range []string{
+		"Caddy CLI 管理面板",
+		"普通站点 · 反代 / 静态",
+		"修改普通站点",
+		"Emby / 通用网关",
+		"修改 Emby / 网关",
+		"服务控制",
+		"配置 / 导入 / 全局设置",
+		"全局设置",
+		"Cloudflare DNS 管理",
+		"诊断 / 证书 / 备份回滚",
+		"安装与更新",
+	} {
+		wanted := clearScreenSequence + "\n====== " + title
+		if !strings.Contains(out.String(), wanted) {
+			t.Errorf("menu %q was not cleared before rendering", title)
+		}
+	}
+}
+
+func TestRegularCommandDoesNotClearInteractiveTerminal(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	app.interactive = true
+	runOK(t, app, "version")
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatalf("regular command output contains ANSI controls: %q", out.String())
+	}
+}
+
 func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 	input := strings.Join([]string{
 		"1", // main: sites

@@ -7,6 +7,7 @@ import (
 
 func (m *menuSession) configMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 配置 / 导入 / 全局设置 ======
 1. 查看当前 Caddyfile
@@ -58,6 +59,7 @@ func (m *menuSession) configMenu() {
 
 func (m *menuSession) settingsMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 全局设置 ======
 1. 设置 ACME 邮箱
@@ -117,6 +119,7 @@ func (m *menuSession) importConfig(merge bool) {
 
 func (m *menuSession) diagnosticsMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 诊断 / 证书 / 备份回滚 ======
 1. 环境检查（doctor）
@@ -175,6 +178,7 @@ func (m *menuSession) undoSnapshot() {
 
 func (m *menuSession) installMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 安装与更新 ======
 1. 安装 / 初始化 Caddy
@@ -215,6 +219,7 @@ func (m *menuSession) installMenu() {
 
 func (m *menuSession) cloudflareMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== Cloudflare DNS 管理 ======
 1. 查看状态

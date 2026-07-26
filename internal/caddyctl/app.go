@@ -38,14 +38,15 @@ type State struct {
 }
 
 type App struct {
-	In         io.Reader
-	Out        io.Writer
-	Err        io.Writer
-	Paths      Paths
-	State      State
-	CaddyBin   string
-	Cloudflare bool
-	NoReload   bool
+	In          io.Reader
+	Out         io.Writer
+	Err         io.Writer
+	Paths       Paths
+	State       State
+	CaddyBin    string
+	Cloudflare  bool
+	NoReload    bool
+	interactive bool
 }
 
 func New(in io.Reader, out, errOut io.Writer) (*App, error) {
@@ -68,9 +69,10 @@ func New(in io.Reader, out, errOut io.Writer) (*App, error) {
 			CloudflareMarker: under("/etc/caddy/.caddyctl-cloudflare"),
 			PendingImport:    under("/etc/caddy/.caddyctl-pending-import"),
 		},
-		State:      State{Timeout: defaultTimeout, UpstreamMode: "warn"},
-		Cloudflare: truthy(os.Getenv("CADDYCTL_CLOUDFLARE")),
-		NoReload:   root != "" || truthy(os.Getenv("CADDYCTL_NO_RELOAD")),
+		State:       State{Timeout: defaultTimeout, UpstreamMode: "warn"},
+		Cloudflare:  truthy(os.Getenv("CADDYCTL_CLOUDFLARE")),
+		NoReload:    root != "" || truthy(os.Getenv("CADDYCTL_NO_RELOAD")),
+		interactive: interactiveTerminal(in, out),
 	}
 	if strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "cloudflare") {
 		app.Cloudflare = true

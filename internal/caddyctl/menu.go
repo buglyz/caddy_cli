@@ -56,6 +56,7 @@ func (a *App) interactiveMenu() error {
 }
 
 func (m *menuSession) printMain() {
+	m.clearScreen()
 	fmt.Fprint(m.app.Out, `
 ====== Caddy CLI 管理面板 ======
 
@@ -83,6 +84,7 @@ func (m *menuSession) printMain() {
 
 func (m *menuSession) sitesMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 普通站点 · 反代 / 静态 ======
 1. 查看所有站点
@@ -121,6 +123,7 @@ func (m *menuSession) sitesMenu() {
 
 func (m *menuSession) embyMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== Emby / 通用网关 ======
 1. 查看 Emby 与网关
@@ -156,6 +159,7 @@ func (m *menuSession) embyMenu() {
 
 func (m *menuSession) serviceMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 服务控制 ======
 1. 启动 Caddy
@@ -252,4 +256,10 @@ func (m *menuSession) pause() {
 
 func (m *menuSession) invalid() {
 	fmt.Fprintln(m.app.Err, "错误: 无效输入")
+}
+
+func (m *menuSession) clearScreen() {
+	if m.app.interactive {
+		fmt.Fprint(m.app.Out, clearScreenSequence)
+	}
 }

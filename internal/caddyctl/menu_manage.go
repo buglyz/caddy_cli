@@ -4,6 +4,7 @@ import "fmt"
 
 func (m *menuSession) modifySitesMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 修改普通站点 ======
 1. 修改反代 / 路径反代
@@ -29,6 +30,7 @@ func (m *menuSession) modifySitesMenu() {
 
 func (m *menuSession) modifyEmbyMenu() {
 	for {
+		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 修改 Emby / 网关 ======
 1. 修改 Emby 固定反代
