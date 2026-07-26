@@ -26,20 +26,20 @@ func (a *App) interactiveMenu() error {
 		}
 		switch choice {
 		case "1":
-			m.sitesMenu()
-		case "2":
-			m.embyMenu()
-		case "3":
 			m.run("list")
 			m.pause()
-		case "4":
-			m.serviceMenu()
-		case "5":
+		case "2":
 			m.run("status")
 			m.pause()
-		case "6":
+		case "3":
 			m.run("logs")
 			m.pause()
+		case "4":
+			m.sitesMenu()
+		case "5":
+			m.embyMenu()
+		case "6":
+			m.serviceMenu()
 		case "7":
 			m.configMenu()
 		case "8":
@@ -60,21 +60,19 @@ func (m *menuSession) printMain() {
 	fmt.Fprint(m.app.Out, `
 ====== Caddy CLI 管理面板 ======
 
-【站点】
-1. 普通站点（反代 / 静态）
-2. Emby / 网关
-3. 查看所有站点
+【快捷操作】
+1. 查看所有站点
+2. 查看服务状态
+3. 查看实时日志
 
-【服务】
-4. 启动 / 重启 / 停止
-5. 服务状态
-6. 实时日志
+【站点管理】
+4. 普通站点（反代 / 静态）
+5. Emby / 网关
 
-【配置】
+【系统管理】
+6. 服务控制（启动 / 重启 / 停止）
 7. 配置 / 导入 / 全局设置
 8. 诊断 / 证书 / 备份回滚
-
-【系统】
 9. 安装与更新
 
 0. 退出
@@ -87,9 +85,14 @@ func (m *menuSession) sitesMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 普通站点 · 反代 / 静态 ======
+【查看】
 1. 查看所有站点
+
+【添加】
 2. 添加反向代理
 3. 添加静态网站
+
+【管理】
 4. 修改站点
 5. 启用 / 禁用站点
 6. 删除站点
@@ -126,9 +129,14 @@ func (m *menuSession) embyMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== Emby / 通用网关 ======
+【查看】
 1. 查看 Emby 与网关
+
+【添加】
 2. 添加 Emby 固定反代
 3. 添加通用反代网关
+
+【管理】
 4. 修改 Emby / 网关
 5. 删除 Emby / 网关
 0. 返回上一级
@@ -162,9 +170,12 @@ func (m *menuSession) serviceMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 服务控制 ======
+【服务操作】
 1. 启动 Caddy
 2. 重启 Caddy
 3. 停止 Caddy
+
+【查看】
 4. 查看服务状态
 5. 实时日志
 0. 返回上一级

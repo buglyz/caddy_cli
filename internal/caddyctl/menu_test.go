@@ -41,9 +41,9 @@ func TestInteractiveTerminalRejectsUnsupportedOutput(t *testing.T) {
 
 func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 	input := strings.Join([]string{
-		"1", "4", "0", "0",
-		"2", "4", "0", "0",
-		"4", "0",
+		"4", "4", "0", "0",
+		"5", "4", "0", "0",
+		"6", "0",
 		"7", "7", "0", "8", "0", "0",
 		"8", "0",
 		"9", "0",
@@ -72,6 +72,79 @@ func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 			t.Errorf("menu %q was not cleared before rendering", title)
 		}
 	}
+	for _, section := range []string{
+		"【查看】", "【添加】", "【管理】", "【服务操作】",
+		"【配置】", "【导入】", "【全局设置】", "【诊断】",
+		"【备份回滚】", "【安装】", "【更新】", "【状态】", "【凭据】",
+	} {
+		if !strings.Contains(out.String(), section) {
+			t.Errorf("layered menus missing section %q", section)
+		}
+	}
+}
+
+func TestMainMenuSectionsAndNumbering(t *testing.T) {
+	app, out, _ := newTestApp(t, "0\n")
+	runOK(t, app)
+	menu := out.String()
+	items := []string{
+		"【快捷操作】",
+		"1. 查看所有站点",
+		"2. 查看服务状态",
+		"3. 查看实时日志",
+		"【站点管理】",
+		"4. 普通站点（反代 / 静态）",
+		"5. Emby / 网关",
+		"【系统管理】",
+		"6. 服务控制（启动 / 重启 / 停止）",
+		"7. 配置 / 导入 / 全局设置",
+		"8. 诊断 / 证书 / 备份回滚",
+		"9. 安装与更新",
+		"0. 退出",
+	}
+	previous := -1
+	for _, item := range items {
+		index := strings.Index(menu, item)
+		if index < 0 {
+			t.Errorf("main menu missing %q", item)
+		} else if index <= previous {
+			t.Errorf("main menu item %q is out of order", item)
+		}
+		previous = index
+	}
+}
+
+func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
+	app, out, errOut := newTestApp(t, "")
+	runOK(t, app, "add", "quick.example.com", "3000", "--skip-dns-check")
+	out.Reset()
+	app.In = strings.NewReader("1\n\n0\n")
+	runOK(t, app)
+	if !strings.Contains(out.String(), "quick.example.com") {
+		t.Fatalf("quick site list did not run: %s", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	app.In = strings.NewReader("2\n\n0\n")
+	runOK(t, app)
+	if !strings.Contains(errOut.String(), "隔离模式不执行 Caddy 服务操作") {
+		t.Fatalf("quick service status did not run: %s", errOut.String())
+	}
+
+	logPath := filepath.Join(app.Paths.Root, "var/log/caddy/caddy.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("quick-log-entry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	app.In = strings.NewReader("3\n\n0\n")
+	runOK(t, app)
+	if !strings.Contains(out.String(), "quick-log-entry") {
+		t.Fatalf("quick logs did not run: %s", out.String())
+	}
 }
 
 func TestRegularCommandDoesNotClearInteractiveTerminal(t *testing.T) {
@@ -85,7 +158,7 @@ func TestRegularCommandDoesNotClearInteractiveTerminal(t *testing.T) {
 
 func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 	input := strings.Join([]string{
-		"1", // main: sites
+		"4", // main: sites
 		"2", // add proxy
 		"app.example.com",
 		"3000",
@@ -114,7 +187,7 @@ func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 
 func TestInteractiveMenuAddsStaticSite(t *testing.T) {
 	input := strings.Join([]string{
-		"1", "3", "static.example.com", "/srv/site", "y", "2", "y", "", "0", "0",
+		"4", "3", "static.example.com", "/srv/site", "y", "2", "y", "", "0", "0",
 	}, "\n") + "\n"
 	app, _, _ := newTestApp(t, input)
 	runOK(t, app, "menu")
@@ -131,7 +204,7 @@ func TestInteractiveMenuAddsStaticSite(t *testing.T) {
 
 func TestInteractiveMenuAddsEmbyAndRestrictedGateway(t *testing.T) {
 	input := strings.Join([]string{
-		"2", "2", "emby.example.com", "https://10.0.0.5:8096", "", "y", "",
+		"5", "2", "emby.example.com", "https://10.0.0.5:8096", "", "y", "",
 		"3", "gate.example.com", "emby.example.com:443", "", "y", "",
 		"0", "0",
 	}, "\n") + "\n"
@@ -156,7 +229,7 @@ func TestInteractiveMenuAddsEmbyAndRestrictedGateway(t *testing.T) {
 
 func TestInteractiveMenuCanModifyDisableAndCancelRemoval(t *testing.T) {
 	input := strings.Join([]string{
-		"1", "4", "1", "app.example.com", "4000", "", "0", "", "0",
+		"4", "4", "1", "app.example.com", "4000", "", "0", "", "0",
 		"5", "app.example.com", "2", "",
 		"6", "app.example.com", "n", "",
 		"0", "0",

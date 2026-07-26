@@ -7,6 +7,7 @@ func (m *menuSession) modifySitesMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 修改普通站点 ======
+【站点类型】
 1. 修改反代 / 路径反代
 2. 修改静态网站
 0. 返回上一级
@@ -33,6 +34,7 @@ func (m *menuSession) modifyEmbyMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 修改 Emby / 网关 ======
+【站点类型】
 1. 修改 Emby 固定反代
 2. 修改通用反代网关
 0. 返回上一级

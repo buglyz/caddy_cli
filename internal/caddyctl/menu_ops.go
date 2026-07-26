@@ -10,15 +10,21 @@ func (m *menuSession) configMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 配置 / 导入 / 全局设置 ======
+【配置】
 1. 查看当前 Caddyfile
 2. 校验配置
 3. 应用配置（reload）
 4. 校验并应用
+
+【导入】
 5. 替换导入（清空 sites.d）
 6. 合并导入（--merge）
+
+【全局设置】
 7. 邮箱 / 超时 / 上游检查
 `)
 		if m.app.Cloudflare {
+			fmt.Fprintln(m.app.Out, "\n【DNS】")
 			fmt.Fprintln(m.app.Out, "8. Cloudflare DNS 管理")
 		}
 		fmt.Fprint(m.app.Out, "0. 返回上一级\n===================================\n")
@@ -122,9 +128,12 @@ func (m *menuSession) diagnosticsMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 诊断 / 证书 / 备份回滚 ======
+【诊断】
 1. 环境检查（doctor）
 2. 实时日志
 3. 证书诊断
+
+【备份回滚】
 4. 查看回滚快照
 5. 回滚（上一步 / 指定快照）
 0. 返回上一级
@@ -181,8 +190,11 @@ func (m *menuSession) installMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 安装与更新 ======
+【安装】
 1. 安装 / 初始化 Caddy
 2. 安装本机 CLI（install-self）
+
+【更新】
 3. 更新 CLI 到滚动版 go-latest
 4. 更新到指定固定版本
 5. 更新 CLI 与 Caddy 二进制
@@ -222,8 +234,11 @@ func (m *menuSession) cloudflareMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== Cloudflare DNS 管理 ======
+【状态】
 1. 查看状态
 2. 检查 Token
+
+【凭据】
 3. 设置 Token
 4. 删除配置
 0. 返回上一级
