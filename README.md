@@ -2,6 +2,10 @@
 
 面向服务器运维的 Go 单文件 Caddy 管理工具，支持 Debian/Ubuntu 与 Alpine Linux。
 
+[![CI](https://github.com/buglyz/caddy_cli/actions/workflows/ci.yml/badge.svg?branch=refactor%2Fgo)](https://github.com/buglyz/caddy_cli/actions/workflows/ci.yml?query=branch%3Arefactor%2Fgo)
+
+> 当前 Go 版本位于 `refactor/go` 分支。GitHub Latest Release 仍是旧 Shell 版，尚不包含 Go 二进制；现阶段请从源码安装。首个 Go Release 发布后，再使用下方的 release 安装器。
+
 ## 功能
 
 - 反代、路径反代、静态站、Emby 和受限动态网关管理
@@ -15,13 +19,55 @@
 
 ## 安装
 
-前置条件：主机已安装 Caddy。Cloudflare 模式还要求 Caddy 包含：
+前置条件：
 
-```text
-dns.providers.cloudflare
+- Go 1.23+（仅源码构建需要）
+- 已安装并可执行的 Caddy
+- Linux `amd64` 或 `arm64`
+
+先确认 Caddy：
+
+```bash
+caddy version
 ```
 
-发布 Go release 后下载并运行安装器：
+Cloudflare 模式还要求 Caddy 包含对应 DNS 模块：
+
+```bash
+caddy list-modules | grep -Fx dns.providers.cloudflare
+```
+
+### 从源码安装（当前推荐）
+
+```bash
+git clone --branch refactor/go https://github.com/buglyz/caddy_cli.git
+cd caddy_cli
+make check
+make build VERSION=dev
+sudo install -m 0755 bin/caddyctl /usr/local/bin/caddyctl
+sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
+c version
+```
+
+Cloudflare 模式需要额外写入版本标记：
+
+```bash
+sudo install -d -m 0755 /etc/caddy
+sudo touch /etc/caddy/.caddyctl-cloudflare
+sudo chmod 0644 /etc/caddy/.caddyctl-cloudflare
+```
+
+### 从 Release 安装（首个 Go Release 发布后）
+
+仅使用明确包含以下三个资产的 tag：
+
+```text
+caddyctl-linux-amd64
+caddyctl-linux-arm64
+caddyctl-checksums.txt
+```
+
+下载当前分支的安装器，并指定 Go release tag：
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh
@@ -49,13 +95,15 @@ sudo CADDYCTL_GO_VERSION=vX.Y.Z bash install-go.sh --cloudflare
 sudo install -m 0755 /usr/local/bin/caddyctl.bak /usr/local/bin/caddyctl
 ```
 
-## 从源码构建
+### 从旧 Shell 版迁移
+
+Go CLI 沿用原来的 `/etc/caddy/sites.d`、`globals.d`、状态文件和快照布局。安装器切换前会把现有 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；旧 Shell 快照也仍可恢复。
+
+首次执行写操作前，Go CLI 会核对 live Caddyfile 与受管片段是否一致。若报告配置漂移，先审查并显式导入：
 
 ```bash
-make check
-make build VERSION=dev
-sudo install -m 0755 bin/caddyctl /usr/local/bin/caddyctl
-sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
+sudo c import --merge /etc/caddy/Caddyfile
+sudo c validate
 ```
 
 ## 常用命令
@@ -67,6 +115,7 @@ c add app.example.com 3000
 c add app.example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
 c set app.example.com --port 4000
+c set-static static.example.com --root /var/www/new --spa
 c enable app.example.com
 c disable app.example.com
 c rm app.example.com
@@ -142,6 +191,32 @@ sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 | `/etc/caddy/backup/snapshots` | 操作快照 |
 | `/etc/caddy/cloudflare.env` | Cloudflare Token |
 
+## 环境变量
+
+| 变量 | 用途 |
+|---|---|
+| `CADDY_BIN` | 指定 Caddy 可执行文件 |
+| `CADDYCTL_ROOT` | 将 `/etc`、日志和锁路径映射到隔离根目录 |
+| `CADDYCTL_NO_RELOAD=1` | 写入配置但不操作服务 |
+| `CADDYCTL_SKIP_DNS_CHECK=1` | 跳过域名指向本机检查 |
+| `CADDYCTL_IMPORT_FORCE=1` | 非交互覆盖导入 |
+| `CADDYCTL_LOCK_WAIT_SECONDS` | 全局锁等待秒数，默认 30 |
+| `CADDYCTL_UPSTREAM_CHECK_MODE` | 本地上游检查模式：`warn` 或 `strict` |
+| `CADDYCTL_CLOUDFLARE=1` | 临时启用 Cloudflare 版行为 |
+| `CADDYCTL_GO_VERSION` | 安装或更新使用的 release tag |
+| `CADDYCTL_GO_REPOSITORY` | 安装或更新使用的 GitHub 仓库 |
+| `CADDYCTL_GO_BIN_DIR` | 安装目录，默认 `/usr/local/bin` |
+
+## 项目结构
+
+```text
+cmd/caddyctl/          CLI 入口
+internal/caddyctl/    配置、站点、快照、导入、诊断和更新实现
+install-go.sh         Release 二进制安装器
+Makefile              构建与验证入口
+.github/workflows/    CI 和 Release 构建
+```
+
 ## 开发与测试
 
 ```bash
@@ -167,6 +242,8 @@ CI 会执行格式检查、单元/集成测试、竞态检测、`go vet`、安�
 - `caddyctl-linux-amd64`
 - `caddyctl-linux-arm64`
 - `caddyctl-checksums.txt`
+
+在首个 Go tag 发布前，不要使用 `CADDYCTL_GO_VERSION=latest`：当前 Latest 仍指向旧 Shell release，不包含 Go 安装资产。
 
 ## 许可证
 
