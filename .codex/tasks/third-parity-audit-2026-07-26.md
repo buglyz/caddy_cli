@@ -1,6 +1,6 @@
 # Go CLI 第三轮行为与错误边界核查
 
-状态：实现与本地验证完成，待发布
+状态：已完成并发布
 
 ## 已确认问题
 
@@ -14,7 +14,7 @@
 - [x] 定向单测和完整 test/race/vet/ShellCheck
 - [x] 所有 Go 文件不超过 400 行
 - [x] 真实 Caddy 隔离验证且生产环境不变
-- [ ] 提交推送并确认 CI / `go-latest`
+- [x] 提交推送并确认 CI / `go-latest`
 
 ## 第四轮事务与解析审查
 
@@ -31,4 +31,5 @@
 - 定向单测、`go test -shuffle=on -count=10`、race、vet、`make check` 全部通过。
 - `bash -n` 与 ShellCheck 通过。
 - 真实 Caddy 隔离验证覆盖 EOF、尾随参数、多个导入源、80 行输出限制及菜单正常退出。
-- 最大 Go 文件 377 行；生产 Caddyfile 哈希、`NRestarts=0`、活动时间戳未变化。
+- 最大 Go 文件 391 行；生产 Caddyfile 哈希、`NRestarts=0`、活动时间戳未变化。
+- 提交 `095eecf` 已推送；CI `30194415099` 与滚动 Release `30194415115` 均成功。
