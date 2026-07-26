@@ -123,22 +123,30 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	managerDir := t.TempDir()
-	recordPath := filepath.Join(managerDir, "service-action")
-	manager := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CADDYCTL_TEST_SERVICE_ACTION\"\n"
-	if err := os.WriteFile(filepath.Join(managerDir, "systemctl"), []byte(manager), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", managerDir)
-	t.Setenv("CADDYCTL_TEST_SERVICE_ACTION", recordPath)
-	isolatedRoot := app.Paths.Root
-	app.Paths.Root = ""
-	app.In = strings.NewReader("2\n\n0\n")
-	runOK(t, app)
-	app.Paths.Root = isolatedRoot
-	action, err := os.ReadFile(recordPath)
-	if err != nil || strings.TrimSpace(string(action)) != "restart caddy" {
-		t.Fatalf("quick restart action=%q err=%v stderr=%s", action, err, errOut.String())
+	if os.Geteuid() == 0 {
+		managerDir := t.TempDir()
+		recordPath := filepath.Join(managerDir, "service-action")
+		manager := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CADDYCTL_TEST_SERVICE_ACTION\"\n"
+		if err := os.WriteFile(filepath.Join(managerDir, "systemctl"), []byte(manager), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", managerDir)
+		t.Setenv("CADDYCTL_TEST_SERVICE_ACTION", recordPath)
+		isolatedRoot := app.Paths.Root
+		app.Paths.Root = ""
+		app.In = strings.NewReader("2\n\n0\n")
+		runOK(t, app)
+		app.Paths.Root = isolatedRoot
+		action, err := os.ReadFile(recordPath)
+		if err != nil || strings.TrimSpace(string(action)) != "restart caddy" {
+			t.Fatalf("quick restart action=%q err=%v stderr=%s", action, err, errOut.String())
+		}
+	} else {
+		app.In = strings.NewReader("2\n\n0\n")
+		runOK(t, app)
+		if !strings.Contains(errOut.String(), "隔离模式不执行 Caddy 服务操作") {
+			t.Fatalf("quick service action did not run: %s", errOut.String())
+		}
 	}
 
 	logPath := filepath.Join(app.Paths.Root, "var/log/caddy/caddy.log")

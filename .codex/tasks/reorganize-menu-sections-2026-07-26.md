@@ -29,6 +29,7 @@
 ## 验证结果
 
 - 主菜单 `1–3` 快速操作映射分别验证为站点列表、重启 Caddy 和实时日志。
+- 快速重启测试在 root 下精确捕获 `restart caddy`，并通过 `nobody` 非 root 路径验证权限边界。
 - 添加、修改、Emby、服务、配置、诊断和安装菜单导航测试通过。
 - `go test ./...`、10 次随机顺序测试、race、vet 与 `make check` 全部通过。
 - linux/amd64 与 linux/arm64 构建、`bash -n` 和 ShellCheck 通过。
