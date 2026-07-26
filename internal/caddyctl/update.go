@@ -17,31 +17,17 @@ import (
 
 var Version = "dev"
 
+const defaultReleaseRef = "go-latest"
+
 var (
 	releaseRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
 	repositoryRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
 
 func (a *App) updateCommand(args []string) error {
-	version := getenv("CADDYCTL_GO_VERSION", "latest")
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--ref":
-			if i+1 >= len(args) {
-				return fmt.Errorf("--ref 需要 release tag 或 latest")
-			}
-			i++
-			version = args[i]
-		case "--latest":
-			version = "latest"
-		case "--binary":
-			return fmt.Errorf("Go 版 update 不更新 Caddy 服务二进制；请单独运行 caddy 的安装器")
-		default:
-			return fmt.Errorf("未知 update 参数: %s", args[i])
-		}
-	}
-	if !validReleaseRef(version) {
-		return fmt.Errorf("release tag 不合法")
+	version, err := updateVersion(args)
+	if err != nil {
+		return err
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -55,6 +41,30 @@ func (a *App) updateCommand(args []string) error {
 	}
 	fmt.Fprintf(a.Out, "Go CLI 已更新；备份: %s.bak\n", executable)
 	return nil
+}
+
+func updateVersion(args []string) (string, error) {
+	version := getenv("CADDYCTL_GO_VERSION", defaultReleaseRef)
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--ref":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--ref 需要 release tag、go-latest 或 latest")
+			}
+			i++
+			version = args[i]
+		case "--latest":
+			version = defaultReleaseRef
+		case "--binary":
+			return "", fmt.Errorf("Go 版 update 不更新 Caddy 服务二进制；请单独运行 caddy 的安装器")
+		default:
+			return "", fmt.Errorf("未知 update 参数: %s", args[i])
+		}
+	}
+	if !validReleaseRef(version) {
+		return "", fmt.Errorf("release tag 不合法")
+	}
+	return version, nil
 }
 
 func updateBinary(destination, version string) error {

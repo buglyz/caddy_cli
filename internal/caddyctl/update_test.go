@@ -100,3 +100,28 @@ func TestReleaseIdentifiersAreStrictlyValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateVersionDefaultsToRollingRelease(t *testing.T) {
+	t.Setenv("CADDYCTL_GO_VERSION", "")
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "default", want: "go-latest"},
+		{name: "latest flag", args: []string{"--latest"}, want: "go-latest"},
+		{name: "fixed ref", args: []string{"--ref", "v0.1.0"}, want: "v0.1.0"},
+		{name: "GitHub latest fixed release", args: []string{"--ref", "latest"}, want: "latest"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := updateVersion(test.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("version=%q, want %q", got, test.want)
+			}
+		})
+	}
+}

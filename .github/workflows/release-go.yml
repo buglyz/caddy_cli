@@ -15,7 +15,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Format, test, race and vet
+        run: make check
+
   build:
+    needs: quality
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,8 +39,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Test
-        run: go test ./...
       - name: Build static binary
         env:
           GOOS: linux
@@ -65,6 +76,10 @@ jobs:
           find dist -name '*.sha256' -type f -print0 \
             | sort -z \
             | xargs -0 cat > dist/caddyctl-checksums.txt
+          (
+            cd dist
+            sha256sum --check caddyctl-checksums.txt
+          )
       - name: Publish assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,22 +101,58 @@ jobs:
             gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
               || gh release create "$tag" \
                 --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
                 --prerelease \
                 --title "Go rolling build" \
                 --notes "Automated build from ${GITHUB_SHA} on refactor/go."
             gh release edit "$tag" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --prerelease \
               --title "Go rolling build" \
               --notes "Automated build from ${GITHUB_SHA} on refactor/go."
           else
             tag="${GITHUB_REF_NAME}"
-            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-              || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Fixed release already exists and will not be modified: $tag" >&2
+              exit 1
+            fi
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes
           fi
-          gh release upload "$tag" \
-            dist/caddyctl-linux-amd64 \
-            dist/caddyctl-linux-arm64 \
-            dist/caddyctl-checksums.txt \
+          upload_args=(
+            "$tag"
+            dist/caddyctl-linux-amd64
+            dist/caddyctl-linux-arm64
+            dist/caddyctl-checksums.txt
+            --repo "$GITHUB_REPOSITORY"
+          )
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            upload_args+=(--clobber)
+          fi
+          gh release upload "${upload_args[@]}"
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          expected_version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            tag="go-latest"
+            expected_version="go-latest-${GITHUB_SHA::7}"
+          fi
+          mkdir -p verify
+          gh release download "$tag" \
             --repo "$GITHUB_REPOSITORY" \
-            --clobber
+            --dir verify \
+            --pattern 'caddyctl-linux-*' \
+            --pattern 'caddyctl-checksums.txt'
+          (
+            cd verify
+            sha256sum --check caddyctl-checksums.txt
+          )
+          chmod 0755 verify/caddyctl-linux-amd64
+          test "$(verify/caddyctl-linux-amd64 version)" = "$expected_version"

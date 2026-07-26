@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly REPOSITORY="${CADDYCTL_GO_REPOSITORY:-buglyz/caddy_cli}"
-readonly VERSION="${CADDYCTL_GO_VERSION:-latest}"
+readonly VERSION="${CADDYCTL_GO_VERSION:-go-latest}"
 readonly BIN_DIR="${CADDYCTL_GO_BIN_DIR:-/usr/local/bin}"
 readonly CLI_BIN="${BIN_DIR}/caddyctl"
 readonly CLI_ALIAS="${BIN_DIR}/c"
@@ -53,7 +53,7 @@ Options:
   --cloudflare  Add github.com/caddy-dns/cloudflare to Caddy.
 
 Environment:
-  CADDYCTL_GO_VERSION           Release tag, go-latest, or latest (default)
+  CADDYCTL_GO_VERSION           Release tag (default: go-latest); use latest for the latest fixed release
   CADDYCTL_GO_REPOSITORY        GitHub owner/repository
   CADDYCTL_GO_RELEASE_BASE_URL  Override release asset base URL (testing)
   CADDYCTL_GO_BIN_DIR           Install directory (default /usr/local/bin)

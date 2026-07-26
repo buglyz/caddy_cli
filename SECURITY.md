@@ -12,6 +12,11 @@ installing Caddy, creating the managed layout, or replacing the current CLI.
 Release tags and GitHub repository identifiers are validated before they are
 used to construct download URLs.
 
+The installer and native updater default to the rolling `go-latest` release,
+which is rebuilt after pushes to `refactor/go`. Operators who require an
+immutable version can set `CADDYCTL_GO_VERSION=vX.Y.Z` or use
+`c update --ref vX.Y.Z`.
+
 The installer keeps the previous executable at
 `/usr/local/bin/caddyctl.bak`. The native updater uses the same `.bak` suffix.
 

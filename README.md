@@ -33,13 +33,13 @@
 无需预装 Caddy 或 Go 工具链。以下命令会从零开始：安装官方 Caddy、准备服务和配置目录，再自动识别 `amd64` / `arm64`，下载 `go-latest` 的预构建 caddyctl，校验 SHA256 后安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo bash
 ```
 
 Cloudflare 版会自动为 Caddy 添加 `dns.providers.cloudflare` 模块：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash -s -- --cloudflare
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo bash -s -- --cloudflare
 ```
 
 如需固定 caddyctl 二进制版本：
@@ -91,13 +91,13 @@ Cloudflare 版：
 sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
 ```
 
-安装器会先下载并校验 caddyctl 资产；校验失败时不会安装 Caddy、创建配置目录或替换现有 CLI。校验通过后会：
+安装器默认下载滚动预发布 `go-latest`。它会先下载并校验 caddyctl 资产；校验失败时不会安装 Caddy、创建配置目录或替换现有 CLI。校验通过后会：
 
-1. 检测 Debian/Ubuntu 或 Alpine；
-2. Caddy 缺失时，通过官方软件源安装、初始化受管 Caddyfile 并配置服务；
-3. `--cloudflare` 模式自动添加并验证 Cloudflare DNS 模块；
-4. 下载 `linux/amd64` 或 `linux/arm64` 预构建 caddyctl；
-5. 使用 `caddyctl-checksums.txt` 校验 SHA256 并执行自检；
+1. 检测 Debian/Ubuntu 或 Alpine，以及 `amd64` / `arm64` 架构；
+2. 下载对应的预构建 caddyctl 和 `caddyctl-checksums.txt`；
+3. 校验 SHA256，并执行新二进制自检；
+4. Caddy 缺失时，通过官方软件源安装、初始化受管 Caddyfile 并配置服务；
+5. `--cloudflare` 模式自动添加并验证 Cloudflare DNS 模块；
 6. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
 7. 安装新二进制并创建 `/usr/local/bin/c` 软链。
 
@@ -156,7 +156,7 @@ c logs
 c doctor
 c cert-check app.example.com
 c version
-c update --latest
+c update
 ```
 
 默认会检查域名 A/AAAA 是否指向本机。内网、测试或 Cloudflare 代理场景可显式使用：
@@ -219,7 +219,7 @@ sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 | `CADDYCTL_LOCK_WAIT_SECONDS` | 全局锁等待秒数，默认 30 |
 | `CADDYCTL_UPSTREAM_CHECK_MODE` | 本地上游检查模式：`warn` 或 `strict` |
 | `CADDYCTL_CLOUDFLARE=1` | 临时启用 Cloudflare 版行为 |
-| `CADDYCTL_GO_VERSION` | 安装或更新使用的 release tag |
+| `CADDYCTL_GO_VERSION` | 安装或更新使用的 release tag，默认 `go-latest`；`latest` 表示 GitHub 最新固定版 |
 | `CADDYCTL_GO_REPOSITORY` | 安装或更新使用的 GitHub 仓库 |
 | `CADDYCTL_GO_BIN_DIR` | 安装目录，默认 `/usr/local/bin` |
 
@@ -253,7 +253,7 @@ CI 会执行格式检查、单元/集成测试、竞态检测、`go vet`、安�
 
 ## 发布
 
-每次向 `refactor/go` 推送普通提交，Release 工作流都会构建两个架构的静态二进制，并覆盖滚动预发布 `go-latest` 中的资产。该滚动 tag 会始终指向最新提交，适合持续安装和测试。
+每次向 `refactor/go` 推送普通提交，Release 工作流会先执行格式检查、单元测试、竞态检测和 `go vet`，通过后构建两个架构的静态二进制，并覆盖滚动预发布 `go-latest` 中的资产。发布后工作流会重新下载三个资产、核对 SHA256，并执行 amd64 二进制确认版本号。该滚动 tag 会始终指向最新通过质量门禁的提交。
 
 推送 `v*` tag 后，Release 工作流会发布：
 
@@ -261,9 +261,9 @@ CI 会执行格式检查、单元/集成测试、竞态检测、`go vet`、安�
 - `caddyctl-linux-arm64`
 - `caddyctl-checksums.txt`
 
-每次发布都应使用递增的新 tag，例如 `v0.1.1`；不要复用或移动已经发布的 tag。
+每次发布都应使用递增的新 tag，例如 `v0.1.1`；不要复用或移动已经发布的 tag。工作流检测到同名固定 Release 已存在时会直接失败，不会覆盖其资产。
 
-`go-latest` 会随普通提交变化；固定版本 Release 保持不变。生产环境建议安装 `v0.1.0` 等固定版本，便于审计和回滚。
+安装脚本和 `c update` 默认使用 `go-latest`，因此不传版本参数即可获得最近一次成功构建。`go-latest` 会随普通提交变化；固定版本 Release 保持不变。如需锁定生产版本，可显式设置 `CADDYCTL_GO_VERSION=v0.1.0` 或运行 `c update --ref v0.1.0`。
 
 ## 许可证
 

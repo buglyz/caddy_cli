@@ -30,11 +30,12 @@ func (a *App) help() {
 服务与维护:
   c start | restart | stop | status | logs
   c cloudflare set|check|remove
-  c update [--ref <release-tag>|--latest]
+  c update [--latest|--ref <release-tag>]
   c version
 
 说明:
   · 所有命令均由 Go 原生实现；安装请使用 install-go.sh。
+  · c update 和 --latest 默认更新到滚动版 go-latest；固定版本使用 --ref vX.Y.Z。
   · 无参数或 menu 会显示本帮助。
   · 设置 CADDYCTL_ROOT 可在隔离目录测试，不会访问生产 /etc/caddy。
 `)
