@@ -68,9 +68,67 @@ jobs:
           install -m 0755 /bin/true "$root/bin/caddyctl"
           CADDYCTL_GO_BIN_DIR="$root/bin" \
           CADDYCTL_GO_CF_MARKER="$root/etc/caddy/.caddyctl-cloudflare" \
+          CADDYCTL_GO_CONFIG_DIR="$root/etc/caddy" \
+          CADDYCTL_GO_LOG_DIR="$root/var/log/caddy" \
           CADDYCTL_GO_RELEASE_BASE_URL="file://$root/release" \
             bash install-go.sh
           test -x "$root/bin/caddyctl"
           test -x "$root/bin/caddyctl.bak"
           test -L "$root/bin/c"
           "$root/bin/caddyctl" --help >/dev/null
+
+  fresh-install:
+    name: Fresh install (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [debian:12-slim, alpine:3.22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build installer fixture
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/caddyctl-release
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath \
+            -o /tmp/caddyctl-release/caddyctl-linux-amd64 \
+            ./cmd/caddyctl
+          (
+            cd /tmp/caddyctl-release
+            sha256sum caddyctl-linux-amd64 > caddyctl-checksums.txt
+          )
+
+      - name: Install Caddy and caddyctl from scratch
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v /tmp/caddyctl-release:/release:ro \
+            "$IMAGE" \
+            sh -ec '
+              if command -v apt-get >/dev/null 2>&1; then
+                apt-get update >/dev/null
+                apt-get install -y --no-install-recommends ca-certificates curl >/dev/null
+              else
+                apk add --no-cache bash curl >/dev/null
+              fi
+              CADDYCTL_GO_RELEASE_BASE_URL=file:///release bash /src/install-go.sh
+              caddy version
+              caddyctl version
+              test -d /etc/caddy/sites.d
+              test -d /var/log/caddy
+              grep -Fxq "# managed by caddyctl" /etc/caddy/Caddyfile
+              CADDYCTL_SKIP_DNS_CHECK=1 CADDYCTL_NO_RELOAD=1 \
+                caddyctl add smoke.example.com 8080
+              caddyctl validate
+            '

@@ -21,40 +21,29 @@
 
 前置条件：
 
-- Go 1.23+（仅源码构建需要）
-- 已安装并可执行的 Caddy
+- Debian/Ubuntu 或 Alpine Linux
+- `curl`、`bash`、root 或 `sudo`
 - Linux `amd64` 或 `arm64`
-
-先确认 Caddy：
-
-```bash
-caddy version
-```
-
-Cloudflare 模式还要求 Caddy 包含对应 DNS 模块：
-
-```bash
-caddy list-modules | grep -Fx dns.providers.cloudflare
-```
+- Go 1.23+（仅源码构建需要）
 
 ### 一键安装预构建版本（推荐）
 
-无需安装 Go 工具链。以下命令会自动识别 `amd64` / `arm64`，下载 `go-latest` 中当前提交的预构建二进制，校验 SHA256 后安装：
+无需预装 Caddy 或 Go 工具链。以下命令会从零开始：安装官方 Caddy、准备服务和配置目录，再自动识别 `amd64` / `arm64`，下载 `go-latest` 的预构建 caddyctl，校验 SHA256 后安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash
 ```
 
-Cloudflare 版：
+Cloudflare 版会自动为 Caddy 添加 `dns.providers.cloudflare` 模块：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash -s -- --cloudflare
 ```
 
-生产环境建议同时固定安装器和二进制版本：
+如需固定 caddyctl 二进制版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v0.1.0/install-go.sh | sudo env CADDYCTL_GO_VERSION=v0.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=v0.1.0 bash
 ```
 
 ### 从源码安装
@@ -69,7 +58,7 @@ sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
 c version
 ```
 
-Cloudflare 模式需要额外写入版本标记：
+从源码手动安装时，需要自行确保 Caddy 已包含 `dns.providers.cloudflare`，并写入版本标记：
 
 ```bash
 sudo install -d -m 0755 /etc/caddy
@@ -102,12 +91,15 @@ sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
 
 安装器会：
 
-1. 检查 Caddy 与当前 CPU 架构；
-2. 下载 `linux/amd64` 或 `linux/arm64` release 二进制；
-3. 使用 release 的 `caddyctl-checksums.txt` 校验 SHA256；
-4. 执行 `--help` 自检；
-5. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
-6. 安装新二进制并创建 `/usr/local/bin/c` 软链。
+1. 检测 Debian/Ubuntu 或 Alpine；
+2. Caddy 缺失时，通过官方软件源安装、初始化受管 Caddyfile 并配置服务；
+3. `--cloudflare` 模式自动添加并验证 Cloudflare DNS 模块；
+4. 下载 `linux/amd64` 或 `linux/arm64` 预构建 caddyctl；
+5. 使用 `caddyctl-checksums.txt` 校验 SHA256 并执行自检；
+6. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
+7. 安装新二进制并创建 `/usr/local/bin/c` 软链。
+
+如果系统已有 Caddy，安装器会保留现有版本和配置，不会主动升级或覆盖；仅在明确使用 `--cloudflare` 且模块缺失时更新 Caddy 二进制。
 
 回滚已有版本：
 
