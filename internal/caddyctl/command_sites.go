@@ -16,24 +16,60 @@ func (a *App) listSites(embyOnly bool) error {
 	if !embyOnly {
 		fmt.Fprintln(a.Out, "===== 邮箱 =====")
 		fmt.Fprintln(a.Out, valueOr(a.State.Email, "<未设置>"))
+		fmt.Fprintln(a.Out, "\n===== 全局片段 =====")
+		globals, globErr := matchingFiles(a.Paths.Globals, "*.inc")
+		if globErr != nil {
+			return globErr
+		}
+		if len(globals) == 0 {
+			fmt.Fprintln(a.Out, "暂无")
+		}
+		for _, path := range globals {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			fmt.Fprintf(a.Out, "---- %s ----\n%s\n", filepath.Base(path), strings.TrimRight(string(data), "\n"))
+		}
 		fmt.Fprintln(a.Out, "\n===== 站点 =====")
 	} else {
 		fmt.Fprintln(a.Out, "===== Emby 配置 =====")
 	}
-	found := false
+	found, disabledFound := false, false
 	for _, site := range sites {
 		if embyOnly && site.Kind != SiteEmby && site.Kind != SiteGateway {
 			continue
 		}
-		status := "禁用"
-		if site.Enabled {
-			status = "启用"
+		if !embyOnly && !site.Enabled {
+			continue
 		}
+		status := map[bool]string{true: "启用", false: "禁用"}[site.Enabled]
 		fmt.Fprintf(a.Out, "---- %s [%s / %s] ----\n%s\n", filepath.Base(site.Path), site.Kind, status, site.Data)
 		found = true
 	}
 	if !found {
 		fmt.Fprintln(a.Out, "暂无")
+	}
+	if !embyOnly {
+		if a.Cloudflare {
+			fmt.Fprintln(a.Out, "\n===== Cloudflare =====")
+			if _, err := os.Stat(a.Paths.CloudflareEnv); err == nil {
+				fmt.Fprintln(a.Out, "状态: 已配置")
+			} else {
+				fmt.Fprintln(a.Out, "状态: 未配置")
+			}
+		}
+		fmt.Fprintln(a.Out, "\n===== 已禁用站点 =====")
+		for _, site := range sites {
+			if site.Enabled {
+				continue
+			}
+			fmt.Fprintf(a.Out, "---- %s [%s / 禁用] ----\n%s\n", filepath.Base(site.Path), site.Kind, site.Data)
+			disabledFound = true
+		}
+		if !disabledFound {
+			fmt.Fprintln(a.Out, "暂无")
+		}
 	}
 	return nil
 }
@@ -45,6 +81,24 @@ func (a *App) removeSite(args []string) error {
 	site, err := a.findSite(args[0])
 	if err != nil {
 		return err
+	}
+	if err := a.removeSiteFile(site); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Out, "已删除: %s\n", args[0])
+	return nil
+}
+
+func (a *App) removeEmbySite(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("用法: c rm-emby <域名>")
+	}
+	site, err := a.findSite(args[0])
+	if err != nil {
+		return err
+	}
+	if site.Kind != SiteEmby && site.Kind != SiteGateway {
+		return fmt.Errorf("该配置不是 Emby 或网关: %s", args[0])
 	}
 	if err := a.removeSiteFile(site); err != nil {
 		return err

@@ -18,6 +18,7 @@
 - 环境诊断、证书检查、日志和本地上游健康检查
 - 经 SHA256 校验的 release 安装和原生自更新
 - 与 Shell `main` 版一致的分层交互管理菜单；无参数或 `c menu` 均可进入
+- 直接运行缺少参数的 `add`、`set`、`rm`、`enable/disable`、`cert-check` 也会进入对应交互提示
 - 兼容 `c install`、`c install-self` 和安装后首次运行导入已有 Caddyfile
 - 严格的命令参数校验，不适用于当前站点类型的选项会直接报错
 

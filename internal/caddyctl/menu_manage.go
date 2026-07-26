@@ -57,6 +57,10 @@ func (m *menuSession) modifyProxy() {
 	if !ok {
 		return
 	}
+	m.modifyProxyLabel(label)
+}
+
+func (m *menuSession) modifyProxyLabel(label string) {
 	args := []string{"set", label}
 	port, ok := m.read("新端口（留空保持）: ")
 	if !ok {
@@ -74,7 +78,7 @@ func (m *menuSession) modifyProxy() {
 	}
 	args = append(args, m.optionalProtocolFlags()...)
 	m.appendOptionalDNSOnly(&args)
-	m.run(args...)
+	m.runChanges(args)
 }
 
 func (m *menuSession) modifyStatic() {
@@ -82,6 +86,10 @@ func (m *menuSession) modifyStatic() {
 	if !ok {
 		return
 	}
+	m.modifyStaticLabel(label)
+}
+
+func (m *menuSession) modifyStaticLabel(label string) {
 	args := []string{"set-static", label}
 	root, ok := m.read("新静态目录（留空保持）: ")
 	if !ok {
@@ -110,7 +118,7 @@ func (m *menuSession) modifyStatic() {
 	}
 	args = append(args, m.optionalProtocolFlags()...)
 	m.appendOptionalDNSOnly(&args)
-	m.run(args...)
+	m.runChanges(args)
 }
 
 func (m *menuSession) modifyEmby() {
@@ -118,6 +126,10 @@ func (m *menuSession) modifyEmby() {
 	if !ok {
 		return
 	}
+	m.modifyEmbyLabel(label)
+}
+
+func (m *menuSession) modifyEmbyLabel(label string) {
 	args := []string{"set-emby", label}
 	target, ok := m.read("新目标地址（留空保持）: ")
 	if !ok {
@@ -128,7 +140,7 @@ func (m *menuSession) modifyEmby() {
 	}
 	args = append(args, m.optionalProtocolFlags()...)
 	m.appendOptionalDNSOnly(&args)
-	m.run(args...)
+	m.runChanges(args)
 }
 
 func (m *menuSession) modifyGateway() {
@@ -136,6 +148,10 @@ func (m *menuSession) modifyGateway() {
 	if !ok {
 		return
 	}
+	m.modifyGatewayLabel(label)
+}
+
+func (m *menuSession) modifyGatewayLabel(label string) {
 	args := []string{"set-gateway", label}
 	allow, ok := m.read("新 allow-list（留空保持，输入 open 改为开放代理）: ")
 	if !ok {
@@ -153,6 +169,14 @@ func (m *menuSession) modifyGateway() {
 	}
 	args = append(args, m.optionalProtocolFlags()...)
 	m.appendOptionalDNSOnly(&args)
+	m.runChanges(args)
+}
+
+func (m *menuSession) runChanges(args []string) {
+	if len(args) == 2 {
+		fmt.Fprintln(m.app.Out, "未提供修改，已取消")
+		return
+	}
 	m.run(args...)
 }
 
@@ -179,14 +203,14 @@ func (m *menuSession) toggleSite() {
 	}
 }
 
-func (m *menuSession) removeSite() {
+func (m *menuSession) removeSite(command string) {
 	label, ok := m.required("要删除的站点地址: ")
 	if !ok {
 		return
 	}
 	confirmed, ok := m.yesNo("确认删除 "+label+"？", false)
 	if ok && confirmed {
-		m.run("rm", label)
+		m.run(command, label)
 	} else if ok {
 		fmt.Fprintln(m.app.Out, "已取消删除")
 	}

@@ -110,7 +110,7 @@ func (m *menuSession) sitesMenu() {
 		case "5":
 			m.toggleSite()
 		case "6":
-			m.removeSite()
+			m.removeSite("rm")
 		default:
 			m.invalid()
 		}
@@ -145,7 +145,7 @@ func (m *menuSession) embyMenu() {
 			m.modifyEmbyMenu()
 			continue
 		case "5":
-			m.removeSite()
+			m.removeSite("rm-emby")
 		default:
 			m.invalid()
 		}

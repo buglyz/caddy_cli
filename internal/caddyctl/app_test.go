@@ -362,7 +362,6 @@ func TestSetRejectsNoOpAndWrongSiteOptions(t *testing.T) {
 	app, _, _ := newTestApp(t, "")
 	runOK(t, app, "add-static", "static.example.com", "/srv/site", "--skip-dns-check")
 	for _, args := range [][]string{
-		{"set-static", "static.example.com"},
 		{"set-static", "static.example.com", "--port", "4000"},
 		{"set-static", "static.example.com", "--root", "/srv/site\nrespond hacked"},
 		{"set-static", "static.example.com", "--dns-only"},

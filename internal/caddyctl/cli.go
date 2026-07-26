@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -75,16 +73,87 @@ func (a *App) Run(args []string) error {
 		}
 		return a.mutate("add-gateway", func() error { return a.addGateway(args) })
 	case "set":
+		if len(args) == 0 {
+			return a.interactiveSetCommand("set", "")
+		}
+		if strings.HasPrefix(args[0], "--") {
+			query, err := a.readRequiredInput("输入要编辑的站点地址: ")
+			if err != nil {
+				return err
+			}
+			args = append([]string{query}, args...)
+		} else if len(args) == 1 {
+			return a.interactiveSetCommand("set", args[0])
+		}
 		return a.mutate("set", func() error { return a.setSite(args) })
 	case "set-static":
+		if len(args) == 0 {
+			return a.interactiveSetCommand("set-static", "")
+		}
+		if strings.HasPrefix(args[0], "--") {
+			query, err := a.readRequiredInput("输入要编辑的静态站点地址: ")
+			if err != nil {
+				return err
+			}
+			args = append([]string{query}, args...)
+		} else if len(args) == 1 {
+			return a.interactiveSetCommand("set-static", args[0])
+		}
 		return a.mutate("set-static", func() error { return a.setStatic(args) })
 	case "set-emby":
+		if len(args) == 0 {
+			return a.interactiveSetCommand("set-emby", "")
+		}
+		if strings.HasPrefix(args[0], "--") {
+			query, err := a.readRequiredInput("输入要编辑的 Emby 站点地址: ")
+			if err != nil {
+				return err
+			}
+			args = append([]string{query}, args...)
+		} else if len(args) == 1 {
+			return a.interactiveSetCommand("set-emby", args[0])
+		}
 		return a.mutate("set-emby", func() error { return a.setEmby(args) })
 	case "set-gateway":
+		if len(args) == 0 {
+			return a.interactiveSetCommand("set-gateway", "")
+		}
+		if strings.HasPrefix(args[0], "--") {
+			query, err := a.readRequiredInput("输入要编辑的网关地址: ")
+			if err != nil {
+				return err
+			}
+			args = append([]string{query}, args...)
+		} else if len(args) == 1 {
+			return a.interactiveSetCommand("set-gateway", args[0])
+		}
 		return a.mutate("set-gateway", func() error { return a.setGateway(args) })
-	case "rm", "del", "delete", "rm-emby", "del-emby", "delete-emby":
+	case "rm", "del", "delete":
+		if len(args) == 0 {
+			query, err := a.readRequiredInput("输入要删除的站点地址: ")
+			if err != nil {
+				return err
+			}
+			args = []string{query}
+		}
 		return a.mutate("rm", func() error { return a.removeSite(args) })
+	case "rm-emby", "del-emby", "delete-emby":
+		if len(args) == 0 {
+			query, err := a.readRequiredInput("输入要删除的 Emby 配置域名: ")
+			if err != nil {
+				return err
+			}
+			args = []string{query}
+		}
+		return a.mutate("rm-emby", func() error { return a.removeEmbySite(args) })
 	case "enable", "disable":
+		if len(args) == 0 {
+			query, err := a.readRequiredInput("输入要切换状态的站点地址: ")
+			if err != nil {
+				return err
+			}
+			args = []string{query}
+		}
 		return a.mutate(cmd, func() error { return a.toggleSite(args, cmd == "enable") })
 	case "email":
 		return a.mutate("email", func() error { return a.setEmail(args) })
@@ -144,6 +213,13 @@ func (a *App) Run(args []string) error {
 	case "doctor", "check-env":
 		return a.doctor()
 	case "cert-check":
+		if len(args) == 0 {
+			domain, err := a.readRequiredInput("输入要诊断的域名: ")
+			if err != nil {
+				return err
+			}
+			args = []string{domain}
+		}
 		return a.certCheck(args)
 	case "import":
 		return a.importCommand(args)
@@ -205,54 +281,6 @@ func knownCommand(cmd string) bool {
 	default:
 		return false
 	}
-}
-
-func (a *App) serviceCommand(action string) error {
-	if a.Paths.Root != "" {
-		return fmt.Errorf("CADDYCTL_ROOT 隔离模式不执行 Caddy 服务操作")
-	}
-	backend := serviceBackend()
-	if backend == "" {
-		return fmt.Errorf("未检测到 service manager")
-	}
-	if action == "status" {
-		if backend == "systemd" {
-			cmd := exec.Command("systemctl", "status", "caddy", "--no-pager")
-			cmd.Stdout, cmd.Stderr = a.Out, a.Err
-			return cmd.Run()
-		}
-		return runServiceCommand(a.State.Timeout, backend, "is-active")
-	}
-	return a.withLock(func() error { return runServiceCommand(a.State.Timeout, backend, action) })
-}
-
-func (a *App) logs() error {
-	if a.Paths.Root == "" {
-		if _, err := exec.LookPath("journalctl"); err == nil {
-			cmd := exec.Command("journalctl", "-u", "caddy", "-n", "120", "--no-pager")
-			cmd.Stdout, cmd.Stderr = a.Out, a.Err
-			if err := cmd.Run(); err == nil {
-				return nil
-			}
-		}
-	}
-	paths := []string{"/var/log/caddy.log", "/var/log/caddy/caddy.log"}
-	for _, path := range paths {
-		if a.Paths.Root != "" {
-			path = filepath.Join(a.Paths.Root, strings.TrimPrefix(path, "/"))
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-		if len(lines) > 120 {
-			lines = lines[len(lines)-120:]
-		}
-		_, err = fmt.Fprintln(a.Out, strings.Join(lines, "\n"))
-		return err
-	}
-	return fmt.Errorf("未检测到 Caddy 日志（无可用 journalctl 或日志文件）")
 }
 
 func (a *App) setTimeout(args []string) error {
