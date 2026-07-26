@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/buglyz/caddy_cli/actions/workflows/ci.yml/badge.svg?branch=refactor%2Fgo)](https://github.com/buglyz/caddy_cli/actions/workflows/ci.yml?query=branch%3Arefactor%2Fgo)
 
-> 当前 Go 版本位于 `refactor/go` 分支，首个 Go Release 为 `v0.1.0`。推荐使用下方的 Release 安装器，也可以从源码构建。
+> 当前 Go 版本位于 `refactor/go` 分支。每次提交都会更新滚动预发布 `go-latest`；首个固定版本为 `v0.1.0`。
 
 ## 功能
 
@@ -37,6 +37,26 @@ Cloudflare 模式还要求 Caddy 包含对应 DNS 模块：
 caddy list-modules | grep -Fx dns.providers.cloudflare
 ```
 
+### 一键安装预构建版本（推荐）
+
+无需安装 Go 工具链。以下命令会自动识别 `amd64` / `arm64`，下载 `go-latest` 中当前提交的预构建二进制，校验 SHA256 后安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash
+```
+
+Cloudflare 版：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=go-latest bash -s -- --cloudflare
+```
+
+生产环境建议同时固定安装器和二进制版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v0.1.0/install-go.sh | sudo env CADDYCTL_GO_VERSION=v0.1.0 bash
+```
+
 ### 从源码安装
 
 ```bash
@@ -57,7 +77,7 @@ sudo touch /etc/caddy/.caddyctl-cloudflare
 sudo chmod 0644 /etc/caddy/.caddyctl-cloudflare
 ```
 
-### 从 Release 安装（推荐）
+### 手动指定 Release 版本
 
 仅使用明确包含以下三个资产的 tag：
 
@@ -237,13 +257,17 @@ CI 会执行格式检查、单元/集成测试、竞态检测、`go vet`、安�
 
 ## 发布
 
+每次向 `refactor/go` 推送普通提交，Release 工作流都会构建两个架构的静态二进制，并覆盖滚动预发布 `go-latest` 中的资产。该滚动 tag 会始终指向最新提交，适合持续安装和测试。
+
 推送 `v*` tag 后，Release 工作流会发布：
 
 - `caddyctl-linux-amd64`
 - `caddyctl-linux-arm64`
 - `caddyctl-checksums.txt`
 
-`v0.1.0` 起，`latest` Release 包含 Go 安装资产；生产环境仍建议显式固定版本号，便于审计和回滚。
+每次发布都应使用递增的新 tag，例如 `v0.1.1`；不要复用或移动已经发布的 tag。
+
+`go-latest` 会随普通提交变化；固定版本 Release 保持不变。生产环境建议安装 `v0.1.0` 等固定版本，便于审计和回滚。
 
 ## 许可证
 

@@ -2,11 +2,17 @@ name: Release Go CLI
 
 on:
   push:
+    branches:
+      - refactor/go
     tags:
       - "v*"
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-go-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -30,8 +36,12 @@ jobs:
         run: |
           set -euo pipefail
           asset="caddyctl-linux-${GOARCH}"
+          version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            version="go-latest-${GITHUB_SHA::7}"
+          fi
           go build -trimpath \
-            -ldflags="-s -w -X github.com/buglyz/caddy_cli/internal/caddyctl.Version=${GITHUB_REF_NAME}" \
+            -ldflags="-s -w -X github.com/buglyz/caddy_cli/internal/caddyctl.Version=${version}" \
             -o "$asset" ./cmd/caddyctl
           sha256sum "$asset" > "${asset}.sha256"
       - uses: actions/upload-artifact@v4
@@ -60,9 +70,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes
+          if [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            tag="go-latest"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+                -f sha="${GITHUB_SHA}" \
+                -F force=true >/dev/null
+            else
+              gh api --method POST \
+                "repos/${GITHUB_REPOSITORY}/git/refs" \
+                -f ref="refs/tags/${tag}" \
+                -f sha="${GITHUB_SHA}" >/dev/null
+            fi
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              || gh release create "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --prerelease \
+                --title "Go rolling build" \
+                --notes "Automated build from ${GITHUB_SHA} on refactor/go."
+            gh release edit "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "Go rolling build" \
+              --notes "Automated build from ${GITHUB_SHA} on refactor/go."
+          else
+            tag="${GITHUB_REF_NAME}"
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes
+          fi
           gh release upload "$tag" \
             dist/caddyctl-linux-amd64 \
             dist/caddyctl-linux-arm64 \
