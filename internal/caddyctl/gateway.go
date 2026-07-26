@@ -25,7 +25,8 @@ func renderGateway(opts SiteOptions, tls string) (string, error) {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Emby 通用反代网关\n# 访问格式: %s://%s/https://<上游主机:端口>/路径\n# 上游限制: %s\n\n%s://%s {\n%s", scheme, label, access, scheme, label, tls)
 	out.WriteString("    request_body {\n        max_size 500MB\n    }\n\n")
-	fmt.Fprintf(&out, "    handle / {\n        respond <<INFO\nOK\n\n通用反代网关 — Emby Proxy Toolbox (Caddy)\n\n使用方式：\n  %s://%s/http://<上游主机:端口>/路径\n  %s://%s/https://<上游主机:端口>/路径\n\n上游限制: %s\n回源协议由路径中的 http:// 或 https:// 决定。\nINFO 200\n    }\n\n", scheme, label, scheme, label, access)
+	info := fmt.Sprintf("OK\n\n通用反代网关 — Emby Proxy Toolbox (Caddy)\n\n使用方式：\n  %s://%s/http://<上游主机:端口>/路径\n  %s://%s/https://<上游主机:端口>/路径\n\n上游限制: %s\n回源协议由路径中的 http:// 或 https:// 决定。", scheme, label, scheme, label, access)
+	fmt.Fprintf(&out, "    handle / {\n        respond %q 200\n    }\n\n", info)
 	if len(opts.Allow) == 0 {
 		emitUnsafeGatewayRoutes(&out, scheme, label)
 	} else {

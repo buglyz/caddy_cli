@@ -49,6 +49,7 @@ func TestRenderGatewayAllowList(t *testing.T) {
 	}
 	for _, value := range []string{
 		"https://gate.example.com {",
+		`respond "OK\n\n通用反代网关`,
 		"header_up X-Real-IP {remote_host}",
 		"header_up Host emby.example.com",
 		"header_down Location ^https://([^/]+)(/.*)$ https://gate.example.com/https://$1$2",
@@ -58,6 +59,9 @@ func TestRenderGatewayAllowList(t *testing.T) {
 		if !strings.Contains(got, value) {
 			t.Errorf("missing %q in gateway", value)
 		}
+	}
+	if strings.Contains(got, "<<INFO") {
+		t.Fatal("gateway uses heredoc unsupported by older Caddy releases")
 	}
 }
 
