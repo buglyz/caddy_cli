@@ -19,7 +19,7 @@ func (a *App) interactiveAddCommand(kind string) error {
 	default:
 		return fmt.Errorf("未知交互添加类型: %s", kind)
 	}
-	return m.lastErr
+	return m.actionError()
 }
 
 func (m *menuSession) addProxy() {

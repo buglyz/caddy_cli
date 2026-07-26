@@ -13,6 +13,7 @@ type menuSession struct {
 	reader  *bufio.Reader
 	lastErr error
 	silent  bool
+	ended   bool
 }
 
 func (a *App) interactiveMenu() error {
@@ -199,8 +200,12 @@ func (m *menuSession) read(prompt string) (string, bool) {
 		return line, true
 	}
 	if errors.Is(err, io.EOF) {
+		if line == "" {
+			m.ended = true
+		}
 		return line, line != ""
 	}
+	m.ended = true
 	fmt.Fprintf(m.app.Err, "错误: 读取输入: %v\n", err)
 	return "", false
 }

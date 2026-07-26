@@ -29,7 +29,7 @@ func (a *App) listSites(embyOnly bool) error {
 			if readErr != nil {
 				return readErr
 			}
-			fmt.Fprintf(a.Out, "---- %s ----\n%s\n", filepath.Base(path), strings.TrimRight(string(data), "\n"))
+			fmt.Fprintf(a.Out, "---- %s ----\n%s\n", filepath.Base(path), firstLines(string(data), 80))
 		}
 		fmt.Fprintln(a.Out, "\n===== 站点 =====")
 	} else {
@@ -72,6 +72,14 @@ func (a *App) listSites(embyOnly bool) error {
 		}
 	}
 	return nil
+}
+
+func firstLines(data string, limit int) string {
+	lines := strings.Split(strings.TrimRight(data, "\n"), "\n")
+	if len(lines) > limit {
+		lines = lines[:limit]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *App) removeSite(args []string) error {

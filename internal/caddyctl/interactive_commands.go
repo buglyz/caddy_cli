@@ -43,7 +43,7 @@ func (a *App) interactiveSetCommand(command, query string) error {
 			return fmt.Errorf("未知交互修改命令: %s", command)
 		}
 	}
-	return m.lastErr
+	return m.actionError()
 }
 
 func (a *App) readRequiredInput(prompt string) (string, error) {
@@ -53,4 +53,14 @@ func (a *App) readRequiredInput(prompt string) (string, error) {
 		return "", fmt.Errorf("未读取到输入")
 	}
 	return value, nil
+}
+
+func (m *menuSession) actionError() error {
+	if m.lastErr != nil {
+		return m.lastErr
+	}
+	if m.ended {
+		return fmt.Errorf("未读取到完整交互输入")
+	}
+	return nil
 }

@@ -16,6 +16,7 @@ type caddyBlock struct {
 
 func (a *App) importCommand(args []string) error {
 	merge, force, source := false, false, a.Paths.Caddyfile
+	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--merge":
@@ -23,16 +24,20 @@ func (a *App) importCommand(args []string) error {
 		case "--force":
 			force = true
 		case "--":
-			if i+1 < len(args) {
-				source = args[i+1]
-			}
+			positional = append(positional, args[i+1:]...)
 			i = len(args)
 		default:
 			if strings.HasPrefix(args[i], "--") {
 				return fmt.Errorf("未知 import 参数: %s", args[i])
 			}
-			source = args[i]
+			positional = append(positional, args[i])
 		}
+	}
+	if len(positional) > 1 {
+		return fmt.Errorf("用法: c import [--merge] [--force] [Caddyfile路径]")
+	}
+	if len(positional) == 1 {
+		source = positional[0]
 	}
 	data, err := os.ReadFile(source)
 	if err != nil {

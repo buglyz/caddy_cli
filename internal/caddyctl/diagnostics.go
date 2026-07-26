@@ -77,7 +77,7 @@ func (a *App) doctor() error {
 }
 
 func (a *App) certCheck(args []string) error {
-	if len(args) == 0 || !validDomain(strings.TrimSpace(args[0])) {
+	if len(args) != 1 || !validDomain(strings.TrimSpace(args[0])) {
 		return fmt.Errorf("用法: c cert-check <合法域名>")
 	}
 	domain := strings.TrimSpace(args[0])

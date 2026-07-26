@@ -27,6 +27,9 @@ func (a *App) cloudflareCommand(args []string) error {
 	if len(args) > 0 && args[0] != "" {
 		action = args[0]
 	}
+	if len(args) > 1 {
+		return fmt.Errorf("用法: c cloudflare set|check|remove")
+	}
 	switch action {
 	case "status", "show":
 		if _, err := os.Stat(a.Paths.CloudflareEnv); err == nil {

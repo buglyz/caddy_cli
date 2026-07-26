@@ -19,6 +19,9 @@ func (a *App) Run(args []string) error {
 		return nil
 	}
 	if cmd == "" || cmd == "menu" {
+		if cmd == "menu" && len(args) > 0 {
+			return fmt.Errorf("用法: c menu")
+		}
 		if os.Geteuid() != 0 && a.Paths.Root == "" {
 			return fmt.Errorf("请用 root 或 sudo 运行，例如: sudo c")
 		}
@@ -29,6 +32,9 @@ func (a *App) Run(args []string) error {
 	}
 	if !knownCommand(cmd) {
 		return fmt.Errorf("未知命令: %s", cmd)
+	}
+	if noArgCommand(cmd) && len(args) > 0 {
+		return fmt.Errorf("用法: c %s", cmd)
 	}
 	readOnly := readOnlyCommand(cmd, args) || cloudflareReadOnly(cmd, args)
 	if !readOnly && os.Geteuid() != 0 && a.Paths.Root == "" {
@@ -246,6 +252,17 @@ func autoImportEligible(cmd string, args []string) bool {
 		return len(args) > 0
 	default:
 		return true
+	}
+}
+
+func noArgCommand(cmd string) bool {
+	switch cmd {
+	case "list", "ls", "list-emby", "emby-list", "validate", "check", "apply", "reload",
+		"config", "cat", "start", "restart", "stop", "status", "logs", "doctor", "check-env",
+		"version", "--version", "install-self", "self-install":
+		return true
+	default:
+		return false
 	}
 }
 
