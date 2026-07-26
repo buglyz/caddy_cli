@@ -55,7 +55,7 @@ jobs:
             -ldflags="-s -w -X github.com/buglyz/caddy_cli/internal/caddyctl.Version=${version}" \
             -o "$asset" ./cmd/caddyctl
           sha256sum "$asset" > "${asset}.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: caddyctl-linux-${{ matrix.goarch }}
           path: |
@@ -66,7 +66,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
