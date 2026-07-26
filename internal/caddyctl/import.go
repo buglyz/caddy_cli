@@ -66,10 +66,11 @@ func (a *App) importCommand(args []string) error {
 func splitCaddyBlocks(text string) ([]caddyBlock, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var result []caddyBlock
-	var current []string
+	var current, currentCode []string
+	var lexer caddyLexer
 	depth, started := 0, false
 	for _, line := range lines {
-		clean := caddyCode(line)
+		clean := lexer.code(line)
 		if !started && strings.TrimSpace(clean) == "" {
 			continue
 		}
@@ -77,47 +78,60 @@ func splitCaddyBlocks(text string) ([]caddyBlock, error) {
 			started = true
 		}
 		current = append(current, line)
+		currentCode = append(currentCode, clean)
 		depth += strings.Count(clean, "{") - strings.Count(clean, "}")
 		if depth < 0 {
 			return nil, fmt.Errorf("Caddyfile 大括号不匹配")
 		}
-		if depth == 0 {
+		if depth == 0 && !lexer.quoted() {
 			header := ""
-			for _, candidate := range current {
-				if trimmed := strings.TrimSpace(caddyCode(candidate)); trimmed != "" {
+			for _, candidate := range currentCode {
+				if trimmed := strings.TrimSpace(candidate); trimmed != "" {
 					header = trimmed
 					break
 				}
 			}
 			result = append(result, caddyBlock{Header: header, Text: strings.TrimRight(strings.Join(current, "\n"), "\n") + "\n"})
-			current, started = nil, false
+			current, currentCode, started = nil, nil, false
 		}
 	}
-	if started || depth != 0 {
-		return nil, fmt.Errorf("Caddyfile 大括号不完整")
+	if started || depth != 0 || lexer.quoted() {
+		return nil, fmt.Errorf("Caddyfile 引号或大括号不完整")
 	}
 	return result, nil
 }
 
-func caddyCode(line string) string {
+type caddyLexer struct {
+	inBacktick bool
+	inDouble   bool
+	escaped    bool
+}
+
+func (l *caddyLexer) code(line string) string {
 	var out strings.Builder
-	inSingle, inDouble, escaped := false, false, false
 	for _, char := range line {
-		if char == '#' && !inSingle && !inDouble {
+		if char == '#' && !l.inBacktick && !l.inDouble {
 			break
 		}
-		out.WriteRune(char)
-		if char == '"' && !inSingle && !escaped {
-			inDouble = !inDouble
-		} else if char == '\'' && !inDouble && !escaped {
-			inSingle = !inSingle
+		if !l.inBacktick && !l.inDouble && char != '`' && char != '"' {
+			out.WriteRune(char)
 		}
-		escaped = char == '\\' && !escaped
+		if char == '"' && !l.inBacktick && !l.escaped {
+			l.inDouble = !l.inDouble
+		} else if char == '`' && !l.inDouble {
+			l.inBacktick = !l.inBacktick
+		}
+		l.escaped = char == '\\' && !l.escaped
 		if char != '\\' {
-			escaped = false
+			l.escaped = false
 		}
 	}
+	l.escaped = false
 	return out.String()
+}
+
+func (l caddyLexer) quoted() bool {
+	return l.inBacktick || l.inDouble
 }
 
 func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {

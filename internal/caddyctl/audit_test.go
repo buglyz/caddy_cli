@@ -57,3 +57,25 @@ func TestFirstLinesLimitsGlobalFragmentOutput(t *testing.T) {
 		t.Fatalf("firstLines did not enforce limit:\n%s", result)
 	}
 }
+
+func TestAddSeparatorDoesNotBypassFlagConflicts(t *testing.T) {
+	if _, err := parseAddFlags([]string{"--http", "--dns-only", "--", "app.example.com", "3000"}, "add"); err == nil {
+		t.Fatal("-- bypassed HTTP/DNS-only conflict")
+	}
+	if _, err := parseAddFlags([]string{"--allow", "example.com:443", "--unsafe-open-proxy", "--", "gate.example.com"}, "add-gateway"); err == nil {
+		t.Fatal("-- bypassed gateway allow/open conflict")
+	}
+}
+
+func TestImportIgnoresLiteralBracesInsideQuotes(t *testing.T) {
+	for _, source := range []string{
+		"literal.example.com {\n    respond \"literal { brace\" 200\n}\n",
+		"literal.example.com {\n    respond `literal { brace` 200\n}\n",
+		"literal.example.com {\n    respond `line one\nliteral { brace\nline three` 200\n}\n",
+	} {
+		blocks, err := splitCaddyBlocks(source)
+		if err != nil || len(blocks) != 1 || blocks[0].Text != source {
+			t.Fatalf("quoted literal brace split failed: blocks=%v err=%v", blocks, err)
+		}
+	}
+}

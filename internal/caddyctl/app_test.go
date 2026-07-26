@@ -349,6 +349,20 @@ func TestAddRejectsIgnoredArgumentsAndUnsupportedDNS(t *testing.T) {
 	}
 }
 
+func TestAddRejectsPartiallyOverlappingSiteLabels(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	runOK(t, app, "add", "a.example.com,b.example.com", "3000", "--skip-dns-check")
+	if err := app.Run([]string{"add", "a.example.com,c.example.com", "4000", "--skip-dns-check"}); err == nil {
+		t.Fatal("add accepted a site label already owned by another config")
+	}
+	if _, err := os.Stat(filepath.Join(app.Paths.Sites, "a.example.com_c.example.com.conf")); !os.IsNotExist(err) {
+		t.Fatalf("overlapping site file was created: %v", err)
+	}
+	if err := app.Run([]string{"add", "A.EXAMPLE.COM", "4000", "--skip-dns-check"}); err == nil {
+		t.Fatal("add accepted a case-insensitive duplicate site label")
+	}
+}
+
 func TestDNSOnlyCannotBeCombinedWithHTTP(t *testing.T) {
 	if _, err := parseAddFlags([]string{"app.example.com", "3000", "--dns-only", "--http"}, "add"); err == nil {
 		t.Fatal("add flags accepted --dns-only with --http")

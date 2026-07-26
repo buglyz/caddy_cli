@@ -127,7 +127,10 @@ func (a *App) createSnapshot(action string) (string, error) {
 }
 
 func (a *App) pruneSnapshots(keep int) {
-	entries, _ := os.ReadDir(a.Paths.Snapshots)
+	entries, err := os.ReadDir(a.Paths.Snapshots)
+	if err != nil {
+		return
+	}
 	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
@@ -152,7 +155,10 @@ func (a *App) snapshotPath(requested string) (string, error) {
 		}
 		return path, nil
 	}
-	entries, _ := os.ReadDir(a.Paths.Snapshots)
+	entries, err := os.ReadDir(a.Paths.Snapshots)
+	if err != nil {
+		return "", fmt.Errorf("读取快照目录: %w", err)
+	}
 	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
@@ -172,6 +178,10 @@ func (a *App) validateSnapshot(path string) error {
 	rel, err := filepath.Rel(a.Paths.Snapshots, clean)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
 		return fmt.Errorf("快照路径不合法")
+	}
+	rootInfo, statErr := os.Lstat(clean)
+	if statErr != nil || rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return fmt.Errorf("快照目录不安全: %s", filepath.Base(clean))
 	}
 	for _, name := range []string{"sites", "globals"} {
 		info, statErr := os.Lstat(filepath.Join(clean, name))

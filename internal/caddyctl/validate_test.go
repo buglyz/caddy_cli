@@ -21,6 +21,9 @@ func TestValidationCompatibility(t *testing.T) {
 		{"email dots", validEmail("a..b@example.org"), false},
 		{"proxy", validProxyTarget("https://10.0.0.5:8096"), true},
 		{"proxy missing host", validProxyTarget("https://"), false},
+		{"proxy path", validProxyTarget("https://example.com/path"), false},
+		{"proxy slash", validProxyTarget("https://example.com/"), false},
+		{"proxy query", validProxyTarget("https://example.com?x=1"), false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

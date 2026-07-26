@@ -41,7 +41,7 @@ func parseAddFlags(args []string, command string) (addFlags, error) {
 			}
 		case "--":
 			result.positional = append(result.positional, args[i+1:]...)
-			return result, nil
+			i = len(args)
 		default:
 			if strings.HasPrefix(args[i], "--") {
 				return result, fmt.Errorf("未知 %s 参数: %s", command, args[i])
@@ -199,7 +199,7 @@ func (a *App) createSite(label string, kind SiteKind, opts SiteOptions) error {
 		return err
 	}
 	for _, site := range sites {
-		if containsAllLabels(site.Labels, label) {
+		if labelsOverlap(site.Labels, extractQueryLabels(label)) {
 			return fmt.Errorf("配置已存在，请使用 c set 修改")
 		}
 	}

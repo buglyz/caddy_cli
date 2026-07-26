@@ -73,7 +73,7 @@ func (a *App) findSite(query string) (siteFile, error) {
 	var fuzzy []siteFile
 	for _, site := range sites {
 		base := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(site.Path), ".disabled"), ".conf")
-		if base == normalized || containsAllLabels(site.Labels, query) {
+		if strings.EqualFold(base, normalized) || containsAllLabels(site.Labels, query) {
 			return site, nil
 		}
 		if strings.Contains(site.Data, query) {
@@ -93,17 +93,41 @@ func (a *App) findSite(query string) (siteFile, error) {
 func containsAllLabels(labels []string, query string) bool {
 	set := map[string]bool{}
 	for _, label := range labels {
-		set[label] = true
+		set[strings.ToLower(label)] = true
 	}
 	found := false
 	for _, raw := range strings.Split(query, ",") {
 		label := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "http://"), "https://"))
-		if label == "" || !set[label] {
+		if label == "" || !set[strings.ToLower(label)] {
 			return false
 		}
 		found = true
 	}
 	return found
+}
+
+func extractQueryLabels(query string) []string {
+	var labels []string
+	for _, raw := range strings.Split(query, ",") {
+		label := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(raw, "http://"), "https://"))
+		if label != "" {
+			labels = append(labels, strings.ToLower(label))
+		}
+	}
+	return labels
+}
+
+func labelsOverlap(existing, requested []string) bool {
+	set := make(map[string]bool, len(existing))
+	for _, label := range existing {
+		set[strings.ToLower(label)] = true
+	}
+	for _, label := range requested {
+		if set[strings.ToLower(label)] {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) sitePath(label string) (string, error) {

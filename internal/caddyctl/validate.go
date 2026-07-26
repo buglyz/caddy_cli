@@ -86,7 +86,8 @@ func validProxyTarget(target string) bool {
 		return false
 	}
 	u, err := url.Parse(target)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" &&
+		u.Path == "" && u.RawPath == "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func parseGatewayAllow(spec string) ([]string, error) {

@@ -84,6 +84,28 @@ func TestSnapshotRejectsSymlinkedDeclaredFile(t *testing.T) {
 	}
 }
 
+func TestSnapshotRejectsSymlinkedRootDirectory(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	if err := app.ensureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := app.createSnapshot("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(app.Paths.Root, "outside-snapshot")
+	if err := os.Rename(snapshot, outside); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(app.Paths.Snapshots, "linked")
+	if err := os.Symlink(outside, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.validateSnapshot(linked); err == nil {
+		t.Fatal("symlinked snapshot root was accepted")
+	}
+}
+
 func TestLegacySnapshotWithoutManifestIsRestorable(t *testing.T) {
 	app, _, _ := newTestApp(t, "")
 	if err := app.ensureDirs(); err != nil {
