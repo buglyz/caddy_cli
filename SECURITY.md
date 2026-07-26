@@ -2,36 +2,28 @@
 
 ## Installation and updates
 
-The installer defaults to a fixed release ref and verifies downloaded files
-against `checksums.txt` from the same ref. To test another ref, set:
+Release installation and `c update` download a platform-specific Go binary and
+verify it against `caddyctl-checksums.txt` from the same GitHub Release. A new
+binary must also pass a local `--help` self-check before replacing the current
+executable.
 
-```bash
-CADDY_CLI_REF=main bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install.sh)
-```
+The installer keeps the previous executable at
+`/usr/local/bin/caddyctl.bak`. The native updater uses the same `.bak` suffix.
 
-Checksum verification can be bypassed with `CADDYCTL_SKIP_CHECKSUM=1`, but this
-should only be used for local development or emergency recovery.
+## Configuration mutations
+
+Before a write operation, caddyctl verifies that the live Caddyfile matches the
+managed `sites.d` / `globals.d` rendering. Each mutation creates a snapshot,
+uses a secure global lock, validates the generated Caddyfile, and restores the
+previous files when validation or service reload fails.
 
 ## Cloudflare token
 
-`c cloudflare set` reads the token from hidden interactive input or stdin. The
-token is written to `/etc/caddy/cloudflare.env` with mode `600` and is not
-accepted as a command-line argument.
+`c cloudflare set` reads the token from stdin and never accepts it as a command
+argument. The token is stored in `/etc/caddy/cloudflare.env` with mode `0600`.
 
 ## Gateway mode
 
-`add-gateway` is a dynamic reverse proxy. By default it requires:
-
-```bash
-c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
-```
-
-Only use `--unsafe-open-proxy` when the gateway is protected by authentication,
-network isolation, or another explicit access-control layer.
-
-
-## Library layout
-
-The shared engine is `caddy-lib.sh` plus modules under `lib/*.sh` (installed to
-`/usr/local/lib/caddyctl`). Remote one-shot `source` of only the entry file is not
-supported; reinstall if the local library is missing.
+`add-gateway` requires an explicit `--allow host:port,...` list by default.
+Only use `--unsafe-open-proxy` when another authentication or network-isolation
+layer protects the gateway.

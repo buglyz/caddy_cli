@@ -1,6 +1,6 @@
 VERSION ?= dev
 
-.PHONY: build test check clean
+.PHONY: build test race vet fmt-check check clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath \
@@ -10,12 +10,16 @@ build:
 test:
 	go test ./...
 
-check:
-	gofmt -w cmd internal
-	go test ./...
+race:
+	go test -race ./...
+
+vet:
 	go vet ./...
-	bash tests/smoke.sh
-	bash tests/functional.sh
+
+fmt-check:
+	test -z "$$(gofmt -l cmd internal)"
+
+check: fmt-check test race vet
 
 clean:
 	rm -rf bin

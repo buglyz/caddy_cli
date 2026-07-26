@@ -19,7 +19,8 @@ func (a *App) Run(args []string) error {
 		return nil
 	}
 	if cmd == "" || cmd == "menu" {
-		return a.runLegacy(cmd, args)
+		a.help()
+		return nil
 	}
 	readOnly := readOnlyCommand(cmd) || cloudflareReadOnly(cmd, args)
 	if !readOnly && os.Geteuid() != 0 && a.Paths.Root == "" {
@@ -114,8 +115,6 @@ func (a *App) Run(args []string) error {
 	case "version", "--version":
 		fmt.Fprintln(a.Out, Version)
 		return nil
-	case "install", "install-self", "self-install":
-		return a.runLegacy(cmd, args)
 	default:
 		return fmt.Errorf("未知命令: %s", cmd)
 	}
@@ -135,23 +134,6 @@ func readOnlyCommand(cmd string) bool {
 	default:
 		return false
 	}
-}
-
-func (a *App) runLegacy(cmd string, args []string) error {
-	path := os.Getenv("CADDYCTL_LEGACY")
-	if path == "" {
-		path = "/usr/local/bin/caddyctl-legacy"
-	}
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("该生命周期命令仍由兼容入口处理，但未找到 %s", path)
-	}
-	all := args
-	if cmd != "" {
-		all = append([]string{cmd}, args...)
-	}
-	command := exec.Command(path, all...)
-	command.Stdin, command.Stdout, command.Stderr = a.In, a.Out, a.Err
-	return command.Run()
 }
 
 func (a *App) serviceCommand(action string) error {

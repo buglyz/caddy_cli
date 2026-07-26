@@ -161,3 +161,11 @@ func TestDoctorAndCertCheckValidation(t *testing.T) {
 		t.Fatal("cert-check accepted an invalid domain")
 	}
 }
+
+func TestEmptyCommandShowsGoHelp(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	runOK(t, app)
+	if !strings.Contains(out.String(), "c add <域名> <端口>") {
+		t.Fatal("empty command did not show Go help")
+	}
+}

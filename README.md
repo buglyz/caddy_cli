@@ -1,299 +1,173 @@
-# Caddy CLI 管理工具
+# Caddy CLI
 
-一个面向服务器运维的 Caddy 管理 CLI。当前 `refactor/go` 分支正在把日常运行时从 Bash 迁移为 Go 单文件二进制，同时保留 Shell 兼容入口处理安装、自更新和交互菜单。支持 **Debian/Ubuntu** 和 **Alpine Linux**。
+面向服务器运维的 Go 单文件 Caddy 管理工具，支持 Debian/Ubuntu 与 Alpine Linux。
 
-## Go 重构版
+## 功能
 
-Go 版已经原生覆盖站点增删改查、静态站、Emby、通用网关、Caddyfile 渲染/校验/应用、并发锁、快照、回滚、导入、服务控制、Cloudflare Token 管理和 release 自更新。`install`、`install-self` 与交互菜单暂时转交保留的 `caddyctl-legacy`，避免重写发行版包管理逻辑。
+- 反代、路径反代、静态站、Emby 和受限动态网关管理
+- `sites.d` / `globals.d` 受管配置渲染
+- Caddy 配置校验、应用及 systemd/OpenRC 服务控制
+- 全局并发锁、操作前快照、失败恢复和 `undo`
+- Caddyfile 覆盖/合并导入
+- Cloudflare DNS-01 Token 与 per-site `--dns-only`
+- 环境诊断、证书检查、日志和本地上游健康检查
+- 经 SHA256 校验的 release 安装和原生自更新
 
-本地构建与验证：
+## 安装
 
-```bash
-make check
-make build
-./bin/caddyctl --help
+前置条件：主机已安装 Caddy。Cloudflare 模式还要求 Caddy 包含：
+
+```text
+dns.providers.cloudflare
 ```
 
-测试时可把所有 `/etc/caddy`、日志和锁路径映射到临时根目录：
+发布 Go release 后下载并运行安装器：
 
 ```bash
-root="$(mktemp -d)"
-CADDYCTL_ROOT="$root" CADDYCTL_SKIP_DNS_CHECK=1 CADDYCTL_NO_RELOAD=1 \
-  ./bin/caddyctl add app.example.com 3000
-```
-
-发布 tag 后，GitHub Actions 会生成静态的 `linux/amd64`、`linux/arm64` 二进制及 SHA256 文件。先安装原 Shell 版，再切换 Go 运行时：
-
-```bash
+curl -fsSLO https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh
 sudo CADDYCTL_GO_VERSION=vX.Y.Z bash install-go.sh
-# Cloudflare 版：
+```
+
+Cloudflare 版：
+
+```bash
 sudo CADDYCTL_GO_VERSION=vX.Y.Z bash install-go.sh --cloudflare
 ```
 
-安装器会先完成 SHA256 校验和 `--help` 自检，再切换 `/usr/local/bin/c`；原入口保留为 `/usr/local/bin/caddyctl-legacy`。回滚只需：
+安装器会：
+
+1. 检查 Caddy 与当前 CPU 架构；
+2. 下载 `linux/amd64` 或 `linux/arm64` release 二进制；
+3. 使用 release 的 `caddyctl-checksums.txt` 校验 SHA256；
+4. 执行 `--help` 自检；
+5. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
+6. 安装新二进制并创建 `/usr/local/bin/c` 软链。
+
+回滚已有版本：
 
 ```bash
-sudo ln -sfn /usr/local/bin/caddyctl-legacy /usr/local/bin/caddyctl
+sudo install -m 0755 /usr/local/bin/caddyctl.bak /usr/local/bin/caddyctl
 ```
 
-现有稳定版 Shell 安装方式继续保留如下。
+## 从源码构建
 
-| 文件 | 说明 |
-|------|------|
-| `cmd/caddyctl` | Go CLI 入口 |
-| `internal/caddyctl` | Go 原生站点、配置、锁、快照、导入和服务实现 |
-| `install-go.sh` | 校验 release 二进制并安全切换 Go 运行时 |
-| `caddy-lib.sh` | 共享库入口（加载 `lib/*.sh` 模块） |
-| `lib/*.sh` | 按职责拆分的共享模块（core/validate/config/service/sites/cmds…） |
-| `caddy.sh` | 标准版前端（source 共享库） |
-| `caddy-cloudflare` | Cloudflare DNS 版前端（override hook 注入 CF 功能） |
-| `install.sh` | 标准版一键安装（自动检测 Debian/Alpine） |
-| `install-cloudflare.sh` | Cloudflare DNS 版一键安装（含预编译 Caddy 二进制） |
-
-## 快速开始
-
-**标准版：**
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r15/install.sh)
-```
-
-**Cloudflare DNS 版（自动申请泛域名证书）：**
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/v2.11.3-cloudflare-r15/install-cloudflare.sh)
-```
-
-> Alpine 用户同上，安装脚本会自动检测发行版并使用 `apk`。  
-> CF 版的预编译二进制是 x86-64 `CGO_ENABLED=0` 纯静态编译，glibc 和 musl 通用；非 x86-64 会自动切换为源码构建。
-> 默认安装固定 release ref，并通过 `checksums.txt` 校验下载文件；如需测试 main，可设置 `CADDY_CLI_REF=main`。
-
-安装完成后直接运行：
-```bash
-sudo c          # 交互菜单
-c help          # 只读帮助（无需 root）
-sudo c doctor   # 环境诊断
+make check
+make build VERSION=dev
+sudo install -m 0755 bin/caddyctl /usr/local/bin/caddyctl
+sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
 ```
 
 ## 常用命令
 
 ```bash
-# 站点管理
+# 站点
 c list
-c add example.com 3000
-c add example.com 3000 --path /api
-c add lan.example.com 3000 --http --skip-dns-check
+c add app.example.com 3000
+c add app.example.com 3000 --path /api
 c add-static static.example.com /var/www/site --spa
-c add-static lan-static.example.com /var/www/site --http --skip-dns-check
-c add lan.example.com 3000 --skip-dns-check
-c set example.com --port 4000
-c set example.com --port 4000 --dns-only
-c enable example.com
-c disable example.com
-c rm example.com
+c set app.example.com --port 4000
+c enable app.example.com
+c disable app.example.com
+c rm app.example.com
 
-# Emby 管理
+# Emby 与网关
 c list-emby
 c add-emby emby.example.com https://10.0.0.5:8096
-c add-emby emby.example.com https://10.0.0.5:8096 --dns-only
-c add-emby lan.example.com http://10.0.0.5:8096 --http
-c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
-c add-gateway gate.local --allow 10.0.0.5:8096 --no-ssl --skip-dns-check
 c set-emby emby.example.com --target https://10.0.0.6:8096
-c set-gateway gate.example.com --allow 10.0.0.6:8096 --https
-c rm-emby emby.example.com
+c add-gateway gate.example.com --allow emby.example.com:443,10.0.0.5:8096
+c set-gateway gate.example.com --allow 10.0.0.6:8096
 
-# 配置与全局设置
-c email admin@example.com
-c import /path/to/Caddyfile
+# 配置与恢复
 c config
 c validate
 c apply
-c timeout 45
-c upstream-mode warn
-
-# 服务控制
-c start
-c restart
-c stop
-
-# 诊断与日志
-c doctor
-c status
-c logs
-c cert-check example.com
-
-# 备份与回滚
-c snapshots
-c undo
-c undo <快照ID>
-
-# 安装与更新
-c install
-c install-self
-c update
-```
-
-## Cloudflare DNS 版额外功能
-
-- 配置 Cloudflare API token 后，默认仍走 **HTTP-01 / TLS-ALPN-01**（不会因为存在 token 就全局强制 DNS-01）
-- 需要 DNS-01（泛域名、CF 橙云、80/443 不可达）时显式加 `--dns-only`：
-  `c add` / `add-static` / `add-emby` / `add-gateway` / `set` / `set-emby` / `set-gateway` 均支持
-- `c set` 会保留站点原有的 `tls { dns cloudflare ... }`（HTTP 模式除外）；也可用 `--dns-only` 重新打开
-- `c cloudflare set` — 配置 Cloudflare API token（交互式隐藏输入；脚本环境可通过 stdin 传入）
-- `c cloudflare check` — 检查 Cloudflare DNS-01 就绪状态
-- `c cloudflare remove` — 删除 Cloudflare 配置
-
-## 功能特性
-
-- 写操作自动快照，可 `c snapshots` 查看、`c undo [快照ID]` 回滚
-- 上游本地端口健康检查（`warn/strict`）
-- 添加域名反代前会检查 DNS A/AAAA 是否解析到本机 IP，可用 `--skip-dns-check` 跳过
-- 交互式添加配置时会询问是否启用 TLS/HTTPS；命令行可用 `--http` 或 `--https` 显式指定
-- 全局并发锁，避免多终端同时修改互相覆盖
-- 配置应用前自动校验，失败自动回滚
-- 配置重载失败时自动降级 `restart`（兼容老 systemd）
-- `c update` 同时更新前端脚本和共享库
-- Hook 扩展架构：Cloudflare 版通过 override 10 个 hook 函数注入功能，零侵入
-- Cloudflare 版支持 per-site DNS-01（`--dns-only`）；默认 HTTP-01，覆盖普通反代、静态站、Emby 与网关
-- 服务抽象层：同时支持 systemd（Debian/Ubuntu）和 OpenRC（Alpine）
-- 通用反代网关：通过 `c add-gateway --allow <host:port,...>` 创建受限动态上游代理，支持 `/http://<host>/path` 和 `/https://<host>/path` 自动路由，并可用 `c set-gateway` 修改 allow-list 或协议
-
-## 供应链与安全
-
-- 安装脚本默认使用固定 tag `v2.11.3-cloudflare-r15`，并校验同 tag 下的 `checksums.txt`。
-- Cloudflare 版预编译 `caddy` **仅通过 GitHub Release 分发**（仓库不再追踪 46MB 二进制）；安装脚本下载 Release 资产并校验 checksum，不可用时用 `--build-from-source`。
-- `c update` 会同时校验前端脚本和共享库；如确需跳过校验，可设置 `CADDYCTL_SKIP_CHECKSUM=1`。
-- Cloudflare 版源码构建固定 Caddy、xcaddy 和 `caddy-dns/cloudflare` 版本；可通过 `CADDY_VERSION`、`XCADDY_VERSION`、`CLOUDFLARE_MODULE` 覆盖。
-- 本地共享库缺失时请重新运行安装脚本。共享库已拆为入口 + `lib/*.sh` 模块，不再支持仅远程 source 入口文件。
-- `add-gateway` 默认必须配置 allow-list。只有在已有认证、内网隔离或其他访问控制时，才使用 `--unsafe-open-proxy`。
-
-## 发行版支持
-
-| 发行版 | 标准版 | Cloudflare DNS 版 |
-|--------|--------|-------------------|
-| Debian / Ubuntu | `apt` + Cloudsmith 官方源 | 预编译二进制 或 `--build-from-source` |
-| Alpine Linux | `apk` + community 源 | 预编译二进制（CGO_ENABLED=0 纯静态）或 `--build-from-source` |
-
-> Cloudflare DNS 版在 Alpine 上如需从源码编译：  
-> `bash install-cloudflare.sh --build-from-source`
-
-## 关键路径
-
-| 路径 | 说明 |
-|------|------|
-| `/etc/caddy/Caddyfile` | 主配置（由脚本自动生成，**请勿手动编辑**） |
-| `/etc/caddy/sites.d` | 站点配置片段 |
-| `/etc/caddy/globals.d` | 全局配置片段 |
-| `/etc/caddy/caddyctl.conf` | 状态文件 |
-| `/etc/caddy/backup/snapshots` | 快照目录 |
-| `/var/log/caddy` | 访问日志 |
-| `/usr/local/bin/caddyctl` | 脚本本体 |
-| `/usr/local/bin/c` | `caddyctl` 软链 |
-| `/usr/local/bin/caddy-lib.sh` | 共享库入口 |
-| `/usr/local/lib/caddyctl/*.sh` | 共享库模块 |
-
-## 测试
-
-```bash
-bash tests/smoke.sh
-bash tests/functional.sh   # 隔离环境全功能回归（不碰生产 /etc/caddy）
-```
-
-## 排障
-
-```bash
-c doctor
-c validate
-c logs
-c cert-check your-domain.com
-```
-
-## 注意事项
-
-- 写操作需要 `root/sudo`；`help` / `list` / `doctor` / `status` / `logs` / `validate` 等只读命令可非 root 尽力执行
-- 如果系统没有 service manager（systemd / OpenRC），脚本只写配置，不会自动重载服务
-- Cloudflare DNS 版需要先运行 `c cloudflare set` 配置 API token
-- **不要手动编辑 `/etc/caddy/Caddyfile`**，它由脚本从 `sites.d/` 和 `globals.d/` 自动生成
-- 不要把 `add-gateway --unsafe-open-proxy` 暴露到公网；它会允许访问者指定任意上游地址。
-
-## 常用高级用法（r13+）
-
-```bash
-# 改静态站目录 / SPA / 协议
-c set-static static.example.com --root /var/www/new --spa
-c set static.example.com --root /var/www/new --https
-
-# 合并导入（保留现有站点）
 c import --merge /path/to/Caddyfile
+c snapshots all
+c undo
 
-# 非交互强制覆盖导入
-c import --force /path/to/Caddyfile
-
-# 更新 CLI 模块，并拉取 Release 中的 caddy 二进制（CF 版）
-c update --binary
+# 服务与诊断
+c status
+c restart
+c logs
+c doctor
+c cert-check app.example.com
+c version
+c update --latest
 ```
 
-`c set` 对普通反代/路径反代/静态站会尽量保留自定义 `header` / `basic_auth` / `log` 等指令；网关与 Emby 模板仅保留这些白名单指令，避免 matcher 泄漏。
-
-## 从旧版（r9 等）升级
-
-`c update` **会跟随当前已安装脚本里的 `DEFAULT_REF`**。  
-若本机还是 r9，直接 `c update` 会继续下载 r9。
-
-一次跳到最新：
+默认会检查域名 A/AAAA 是否指向本机。内网、测试或 Cloudflare 代理场景可显式使用：
 
 ```bash
-# 推荐（CF 版）
-sudo CADDY_CLI_REF=main bash -c 'bash <(curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/main/install-cloudflare.sh)'
-
-# 或仅更新 CLI（本机已是较新版本且支持 --ref）
-sudo c update --ref main
-# 等价
-sudo CADDY_CLI_REF=main c update
-
-# 连同预编译 caddy 二进制
-sudo c update --ref main --binary
+c add app.example.com 3000 --skip-dns-check
 ```
 
-当前默认安装 ref：`v2.11.3-cloudflare-r15`。
+## Cloudflare DNS-01
 
-
-
-## r15 变更摘要
-
-- doctor dual-write：抽样对比 sites.d vs 主 Caddyfile（标签 / reverse_proxy / dns cloudflare）
-- functional §18：env 优先级、cmd_add 拒绝 .disabled、dual-write 取消 auto-import
-- ShellCheck：去掉未用变量；install 备份函数无参
-
-## r14 变更摘要
-
-- 安装默认 ref：`v2.11.3-cloudflare-r15`
-- `c validate` / doctor 校验：自动 source `/etc/caddy/cloudflare.env`（及 hook / `CADDYCTL_CLOUDFLARE_ENV`），减少「CLI 红、reload 绿」
-- `c import`：覆盖/合并前打印现有站点与全局片段摘要
-- `c doctor`：报告 DEFAULT_REF、pending/failed auto-import 标记、import sites.d vs 内联/dual-write 布局
-- 首次 auto-import：明确提示会重写为 managed 布局；双写主机用 `CADDYCTL_SKIP_AUTO_IMPORT=1`
-
-## 安装后自动导入现有配置
-
-安装脚本会：
-
-1. **先备份** 现有 `/etc/caddy/Caddyfile`、`sites.d` 等 → `/etc/caddy/backup/pre-install-<时间戳>/`
-2. 若存在**非空 Caddyfile** 且 **sites.d 为空**，写入标记  
-   `/etc/caddy/.caddyctl-pending-import`
-3. **安装完成后第一次运行** `c` / `c list` / `c doctor` 等（root）时，自动执行：  
-   `c import --force /etc/caddy/Caddyfile` 并 `c apply`
-
-跳过自动导入：
+Cloudflare 安装模式会写入 `/etc/caddy/.caddyctl-cloudflare` 标记。配置 Token：
 
 ```bash
-sudo CADDYCTL_SKIP_AUTO_IMPORT=1 c list
-# 或安装时
-sudo CADDYCTL_SKIP_AUTO_IMPORT=1 bash install-cloudflare.sh
+sudo c cloudflare set
+sudo c cloudflare check
 ```
 
-手动导入：
+Token 不接受命令行参数，写入 `/etc/caddy/cloudflare.env`，权限为 `0600`。需要 DNS-01 的站点显式添加：
 
 ```bash
-sudo c import --force /etc/caddy/Caddyfile
-# 已有 sites.d 时合并
-sudo c import --merge /etc/caddy/Caddyfile
+sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 ```
+
+普通站点默认仍使用 HTTP-01 / TLS-ALPN-01。
+
+## 安全机制
+
+- 写操作需要 root；只读命令支持非 root 尽力检查
+- 写操作前确认 live Caddyfile 与受管渲染一致，防止覆盖未知配置
+- 配置先生成、检查本地上游、执行 `caddy validate`，再原子替换
+- apply/reload 失败会恢复站点文件、状态和 live Caddyfile
+- 锁目录与锁文件拒绝符号链接和非当前用户属主
+- 默认保留最近 30 个快照，支持旧 Shell 快照格式恢复
+- `add-gateway` 默认必须提供 allow-list；开放代理必须显式使用 `--unsafe-open-proxy`
+
+## 路径
+
+| 路径 | 用途 |
+|---|---|
+| `/usr/local/bin/caddyctl` | Go CLI 二进制 |
+| `/usr/local/bin/c` | CLI 软链 |
+| `/etc/caddy/Caddyfile` | 生成后的 live 配置 |
+| `/etc/caddy/sites.d` | 站点片段 |
+| `/etc/caddy/globals.d` | 全局片段 |
+| `/etc/caddy/caddyctl.conf` | CLI 状态 |
+| `/etc/caddy/backup/snapshots` | 操作快照 |
+| `/etc/caddy/cloudflare.env` | Cloudflare Token |
+
+## 开发与测试
+
+```bash
+make check
+```
+
+隔离测试可通过 `CADDYCTL_ROOT` 重映射所有受管路径：
+
+```bash
+root="$(mktemp -d)"
+CADDYCTL_ROOT="$root" \
+CADDYCTL_SKIP_DNS_CHECK=1 \
+CADDYCTL_NO_RELOAD=1 \
+  go run ./cmd/caddyctl add app.example.com 3000
+```
+
+CI 会执行格式检查、单元/集成测试、竞态检测、`go vet`、安装器 ShellCheck、真实 Caddy 校验及 amd64/arm64 静态构建。
+
+## 发布
+
+推送 `v*` tag 后，Release 工作流会发布：
+
+- `caddyctl-linux-amd64`
+- `caddyctl-linux-arm64`
+- `caddyctl-checksums.txt`
+
+## 许可证
+
+[MIT](LICENSE)

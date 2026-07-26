@@ -27,15 +27,15 @@ func (a *App) help() {
   c snapshots [数量|all]
   c undo [快照ID]
 
-服务与生命周期:
+服务与维护:
   c start | restart | stop | status | logs
   c cloudflare set|check|remove
-  c install | install-self | update | menu
+  c update [--ref <release-tag>|--latest]
   c version
 
 说明:
-  · 日常配置命令由 Go 原生实现。
-  · install/menu 暂由 caddyctl-legacy 兼容入口处理；update 原生更新 Go release 二进制。
+  · 所有命令均由 Go 原生实现；安装请使用 install-go.sh。
+  · 无参数或 menu 会显示本帮助。
   · 设置 CADDYCTL_ROOT 可在隔离目录测试，不会访问生产 /etc/caddy。
 `)
 }
