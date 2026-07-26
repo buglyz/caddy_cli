@@ -58,15 +58,15 @@ func (a *App) cloudflareCommand(args []string) error {
 				return err
 			}
 			content := fmt.Sprintf("CLOUDFLARE_API_TOKEN=\"%s\"\n", escapeEnv(token))
-			if err := atomicWrite(a.Paths.CloudflareEnv, []byte(content), 0o600); err != nil {
+			if err := a.changeCloudflareEnv([]byte(content)); err != nil {
 				return err
 			}
 			fmt.Fprintln(a.Out, "Cloudflare API Token 已保存")
 			return nil
 		})
-	case "remove":
+	case "remove", "clear", "disable", "off", "none":
 		return a.mutate("cloudflare", func() error {
-			if err := os.Remove(a.Paths.CloudflareEnv); err != nil && !os.IsNotExist(err) {
+			if err := a.changeCloudflareEnv(nil); err != nil {
 				return err
 			}
 			fmt.Fprintln(a.Out, "Cloudflare 配置已删除")
@@ -75,6 +75,30 @@ func (a *App) cloudflareCommand(args []string) error {
 	default:
 		return fmt.Errorf("未知 cloudflare 子命令: %s", action)
 	}
+}
+
+func (a *App) changeCloudflareEnv(content []byte) error {
+	old, readErr := os.ReadFile(a.Paths.CloudflareEnv)
+	hadOld := readErr == nil
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	if content == nil {
+		if err := os.Remove(a.Paths.CloudflareEnv); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	} else if err := atomicWrite(a.Paths.CloudflareEnv, content, 0o600); err != nil {
+		return err
+	}
+	if err := a.apply(); err != nil {
+		if hadOld {
+			_ = atomicWrite(a.Paths.CloudflareEnv, old, 0o600)
+		} else {
+			_ = os.Remove(a.Paths.CloudflareEnv)
+		}
+		return fmt.Errorf("应用 Cloudflare 设置失败，已恢复环境文件: %w", err)
+	}
+	return nil
 }
 
 func readTokenInput(reader io.Reader) (string, error) {

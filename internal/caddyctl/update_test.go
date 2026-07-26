@@ -125,3 +125,27 @@ func TestUpdateVersionDefaultsToRollingRelease(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateVersionAcceptsShellCompatibleRefForms(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--ref=v0.2.0"}, "v0.2.0"},
+		{[]string{"--main"}, defaultReleaseRef},
+	} {
+		got, err := updateVersion(test.args)
+		if err != nil || got != test.want {
+			t.Errorf("updateVersion(%v)=%q,%v want %q", test.args, got, err, test.want)
+		}
+	}
+}
+
+func TestUpdateOptionsAcceptCaddyBinaryAliases(t *testing.T) {
+	for _, flag := range []string{"--binary", "--with-binary"} {
+		options, err := parseUpdateOptions([]string{flag})
+		if err != nil || !options.caddyBinary {
+			t.Errorf("parseUpdateOptions(%q)=%+v,%v", flag, options, err)
+		}
+	}
+}

@@ -9,6 +9,7 @@ readonly CLI_ALIAS="${BIN_DIR}/c"
 readonly BACKUP_BIN="${CLI_BIN}.bak"
 readonly CF_MARKER="${CADDYCTL_GO_CF_MARKER:-/etc/caddy/.caddyctl-cloudflare}"
 readonly CONFIG_DIR="${CADDYCTL_GO_CONFIG_DIR:-$(dirname "$CF_MARKER")}"
+readonly PENDING_IMPORT_MARKER="${CADDYCTL_GO_PENDING_IMPORT_MARKER:-${CONFIG_DIR}/.caddyctl-pending-import}"
 readonly LOG_DIR="${CADDYCTL_GO_LOG_DIR:-/var/log/caddy}"
 readonly SYSTEMD_DROPIN_DIR="${CADDYCTL_GO_SYSTEMD_DROPIN_DIR:-/etc/systemd/system/caddy.service.d}"
 readonly OPENRC_CONF="${CADDYCTL_GO_OPENRC_CONF:-/etc/conf.d/caddy}"
@@ -152,14 +153,23 @@ detect_distro() {
 }
 
 backup_existing_config() {
-    local backup_dir stamp
+    local backup_dir stamp path has_config=0
     [[ -d "$CONFIG_DIR" ]] || return 0
-    [[ -e "$CONFIG_DIR/Caddyfile" || -e "$CONFIG_DIR/sites.d" \
-        || -e "$CONFIG_DIR/globals.d" || -e "$CONFIG_DIR/caddyctl.conf" ]] || return 0
+    for path in Caddyfile caddyctl.conf cloudflare.env; do
+        [[ -s "$CONFIG_DIR/$path" ]] && has_config=1
+    done
+    for path in sites.d globals.d; do
+        if [[ -d "$CONFIG_DIR/$path" ]] \
+            && find "$CONFIG_DIR/$path" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            has_config=1
+        fi
+    done
+    (( has_config == 1 )) || return 0
     PREEXISTING_CONFIG=1
     stamp="$(date +%Y%m%d-%H%M%S)"
-    backup_dir="$CONFIG_DIR/backup/pre-install-$stamp"
-    install -d -m 0700 "$backup_dir"
+    install -d -m 0700 "$CONFIG_DIR/backup"
+    backup_dir="$(mktemp -d "$CONFIG_DIR/backup/pre-install-${stamp}.XXXXXX")"
+    chmod 0700 "$backup_dir"
     for name in Caddyfile sites.d globals.d caddyctl.conf cloudflare.env; do
         if [[ -e "$CONFIG_DIR/$name" ]]; then
             cp -a -- "$CONFIG_DIR/$name" "$backup_dir/$name"
@@ -210,7 +220,6 @@ install_caddy_if_needed() {
         log "Keeping existing Caddy: $(caddy version 2>/dev/null || printf unknown)"
         return 0
     fi
-    backup_existing_config
     case "$DISTRO" in
         debian) install_caddy_debian ;;
         alpine) install_caddy_alpine ;;
@@ -219,6 +228,23 @@ install_caddy_if_needed() {
     CADDY_CHANGED=1
     CADDY_INSTALLED=1
     log "Caddy installed: $(caddy version)"
+}
+
+mark_pending_import() {
+    (( PREEXISTING_CONFIG == 1 )) || return 0
+    [[ -s "$CONFIG_DIR/Caddyfile" ]] || return 0
+    if [[ -e "${PENDING_IMPORT_MARKER}.failed" ]]; then
+        log "A previous automatic import failed; not scheduling another attempt."
+        return 0
+    fi
+    if find "$CONFIG_DIR/sites.d" -maxdepth 1 -type f \
+        \( -name '*.conf' -o -name '*.conf.disabled' \) -print -quit | grep -q .; then
+        log "Existing sites.d is populated; automatic import is not scheduled."
+        return 0
+    fi
+    : > "$PENDING_IMPORT_MARKER"
+    chmod 0644 "$PENDING_IMPORT_MARKER"
+    log "Existing Caddyfile will be imported safely on the first root caddyctl run."
 }
 
 configure_cloudflare() {
@@ -344,8 +370,10 @@ main() {
     chmod 0755 "$binary"
     "$binary" --help >/dev/null
 
+    backup_existing_config
     install_caddy_if_needed
     prepare_layout
+    mark_pending_import
     configure_cloudflare
     configure_service_environment
 

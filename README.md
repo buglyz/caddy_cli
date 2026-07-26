@@ -17,6 +17,8 @@
 - Cloudflare DNS-01 Token 与 per-site `--dns-only`
 - 环境诊断、证书检查、日志和本地上游健康检查
 - 经 SHA256 校验的 release 安装和原生自更新
+- 与 Shell `main` 版一致的分层交互管理菜单；无参数或 `c menu` 均可进入
+- 兼容 `c install`、`c install-self` 和安装后首次运行导入已有 Caddyfile
 - 严格的命令参数校验，不适用于当前站点类型的选项会直接报错
 
 ## 安装
@@ -58,6 +60,7 @@ make build VERSION=dev
 sudo install -m 0755 bin/caddyctl /usr/local/bin/caddyctl
 sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
 c version
+c                    # 进入交互管理菜单
 ```
 
 从源码手动安装时，需要自行确保 Caddy 已包含 `dns.providers.cloudflare`，并写入版本标记：
@@ -98,8 +101,9 @@ sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
 3. 校验 SHA256，并执行新二进制自检；
 4. Caddy 缺失时，通过官方软件源安装、初始化受管 Caddyfile 并配置服务；
 5. `--cloudflare` 模式自动添加并验证 Cloudflare DNS 模块；
-6. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
-7. 安装新二进制并创建 `/usr/local/bin/c` 软链。
+6. 备份已有 Caddy 配置，并在已有内联 Caddyfile 且 `sites.d` 为空时创建首次导入标记；
+7. 将原 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；
+8. 安装新二进制并创建 `/usr/local/bin/c` 软链。
 
 如果系统已有 Caddy，安装器会保留现有版本和配置，不会主动升级或覆盖；仅在明确使用 `--cloudflare` 且模块缺失时更新 Caddy 二进制。
 
@@ -111,9 +115,11 @@ sudo install -m 0755 /usr/local/bin/caddyctl.bak /usr/local/bin/caddyctl
 
 ### 从旧 Shell 版迁移
 
-Go CLI 沿用原来的 `/etc/caddy/sites.d`、`globals.d`、状态文件和快照布局。安装器切换前会把现有 `/usr/local/bin/caddyctl` 备份为 `caddyctl.bak`；旧 Shell 快照也仍可恢复。
+Go CLI 沿用原来的 `/etc/caddy/sites.d`、`globals.d`、状态文件和快照布局。安装器切换前会分别备份现有配置和 `/usr/local/bin/caddyctl`；旧 Shell 快照也仍可恢复。
 
-首次执行写操作前，Go CLI 会核对 live Caddyfile 与受管片段是否一致。若报告配置漂移，先审查并显式导入：
+当安装器发现已有非空 Caddyfile 且 `sites.d` 为空时，会创建一次性导入标记。首次以 root 运行 `c` 后，Go CLI 会先创建快照、导入并校验；失败会恢复并把标记改为 `.failed`。已有 `sites.d` 时不会自动覆盖。需要跳过可设置 `CADDYCTL_SKIP_AUTO_IMPORT=1`。
+
+未经过安装器迁移或报告配置漂移时，先审查并显式导入：
 
 ```bash
 sudo c import --merge /etc/caddy/Caddyfile
@@ -124,6 +130,7 @@ sudo c validate
 
 ```bash
 # 站点
+c                    # 交互添加、修改、启停和删除
 c list
 c add app.example.com 3000
 c add app.example.com 3000 --path /api
@@ -157,6 +164,8 @@ c doctor
 c cert-check app.example.com
 c version
 c update
+c update --binary    # 同时执行 caddy upgrade --keep-backup，不自动重启服务
+c install-self       # 安装当前正在运行的 Go 二进制及 c 别名
 ```
 
 默认会检查域名 A/AAAA 是否指向本机。内网、测试或 Cloudflare 代理场景可显式使用：
@@ -222,6 +231,8 @@ sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 | `CADDYCTL_GO_VERSION` | 安装或更新使用的 release tag，默认 `go-latest`；`latest` 表示 GitHub 最新固定版 |
 | `CADDYCTL_GO_REPOSITORY` | 安装或更新使用的 GitHub 仓库 |
 | `CADDYCTL_GO_BIN_DIR` | 安装目录，默认 `/usr/local/bin` |
+| `CADDYCTL_GO_INSTALLER_REF` | `c install` 获取安装器的分支，默认 `refactor/go` |
+| `CADDYCTL_SKIP_AUTO_IMPORT=1` | 跳过安装后首次运行的已有 Caddyfile 自动导入 |
 
 ## 项目结构
 

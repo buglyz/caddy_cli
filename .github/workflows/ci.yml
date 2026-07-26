@@ -80,6 +80,9 @@ jobs:
           fi
           test "$(sha256sum "$root/bin/caddyctl")" = "$before"
           test ! -e "$root/etc/caddy"
+          mkdir -p "$root/etc/caddy"
+          printf 'legacy.example.com {\n    reverse_proxy 127.0.0.1:3000\n}\n' \
+            > "$root/etc/caddy/Caddyfile"
           CADDYCTL_GO_BIN_DIR="$root/bin" \
           CADDYCTL_GO_CF_MARKER="$root/etc/caddy/.caddyctl-cloudflare" \
           CADDYCTL_GO_CONFIG_DIR="$root/etc/caddy" \
@@ -89,6 +92,8 @@ jobs:
           test -x "$root/bin/caddyctl"
           test -x "$root/bin/caddyctl.bak"
           test -L "$root/bin/c"
+          test -f "$root/etc/caddy/.caddyctl-pending-import"
+          find "$root/etc/caddy/backup" -path '*/pre-install-*/Caddyfile' -type f | grep -q .
           "$root/bin/caddyctl" --help >/dev/null
 
   fresh-install:

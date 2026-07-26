@@ -25,7 +25,7 @@ var (
 )
 
 func (a *App) updateCommand(args []string) error {
-	version, err := updateVersion(args)
+	options, err := parseUpdateOptions(args)
 	if err != nil {
 		return err
 	}
@@ -36,35 +36,69 @@ func (a *App) updateCommand(args []string) error {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
 	}
-	if err := updateBinary(executable, version); err != nil {
+	if err := updateBinary(executable, options.version); err != nil {
 		return err
 	}
 	fmt.Fprintf(a.Out, "Go CLI 已更新；备份: %s.bak\n", executable)
+	if options.caddyBinary {
+		if err := a.updateCaddyBinary(); err != nil {
+			return fmt.Errorf("Go CLI 已更新，但 Caddy 二进制更新失败: %w", err)
+		}
+	}
 	return nil
 }
 
-func updateVersion(args []string) (string, error) {
-	version := getenv("CADDYCTL_GO_VERSION", defaultReleaseRef)
+type updateOptions struct {
+	version     string
+	caddyBinary bool
+}
+
+func parseUpdateOptions(args []string) (updateOptions, error) {
+	result := updateOptions{version: getenv("CADDYCTL_GO_VERSION", defaultReleaseRef)}
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--ref":
+		arg := args[i]
+		switch {
+		case arg == "--ref":
 			if i+1 >= len(args) {
-				return "", fmt.Errorf("--ref 需要 release tag、go-latest 或 latest")
+				return result, fmt.Errorf("--ref 需要 release tag、go-latest 或 latest")
 			}
 			i++
-			version = args[i]
-		case "--latest":
-			version = defaultReleaseRef
-		case "--binary":
-			return "", fmt.Errorf("Go 版 update 不更新 Caddy 服务二进制；请单独运行 caddy 的安装器")
+			result.version = args[i]
+		case strings.HasPrefix(arg, "--ref="):
+			result.version = strings.TrimPrefix(arg, "--ref=")
+		case arg == "--latest" || arg == "--main":
+			result.version = defaultReleaseRef
+		case arg == "--binary" || arg == "--with-binary":
+			result.caddyBinary = true
 		default:
-			return "", fmt.Errorf("未知 update 参数: %s", args[i])
+			return result, fmt.Errorf("未知 update 参数: %s", arg)
 		}
 	}
-	if !validReleaseRef(version) {
-		return "", fmt.Errorf("release tag 不合法")
+	if !validReleaseRef(result.version) {
+		return result, fmt.Errorf("release tag 不合法")
 	}
-	return version, nil
+	return result, nil
+}
+
+func updateVersion(args []string) (string, error) {
+	options, err := parseUpdateOptions(args)
+	return options.version, err
+}
+
+func (a *App) updateCaddyBinary() error {
+	if a.Paths.Root != "" {
+		return fmt.Errorf("CADDYCTL_ROOT 隔离模式不更新 Caddy 二进制")
+	}
+	if err := a.caddyExists(); err != nil {
+		return err
+	}
+	cmd := exec.Command(a.CaddyBin, "upgrade", "--keep-backup")
+	cmd.Stdout, cmd.Stderr = a.Out, a.Err
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	fmt.Fprintln(a.Out, "Caddy 二进制已更新并保留上一个版本备份；服务将在下次重启后使用新版本。")
+	return nil
 }
 
 func updateBinary(destination, version string) error {

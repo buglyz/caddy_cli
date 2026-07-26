@@ -28,6 +28,7 @@ type Paths struct {
 	Lock             string
 	CloudflareEnv    string
 	CloudflareMarker string
+	PendingImport    string
 }
 
 type State struct {
@@ -65,6 +66,7 @@ func New(in io.Reader, out, errOut io.Writer) (*App, error) {
 			Lock:             under("/run/lock/caddyctl/caddyctl.lock"),
 			CloudflareEnv:    under("/etc/caddy/cloudflare.env"),
 			CloudflareMarker: under("/etc/caddy/.caddyctl-cloudflare"),
+			PendingImport:    under("/etc/caddy/.caddyctl-pending-import"),
 		},
 		State:      State{Timeout: defaultTimeout, UpstreamMode: "warn"},
 		Cloudflare: truthy(os.Getenv("CADDYCTL_CLOUDFLARE")),

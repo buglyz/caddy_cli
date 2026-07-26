@@ -151,22 +151,49 @@ func TestCloudflareTokenSetUsesStdinAndMode0600(t *testing.T) {
 	}
 }
 
+func TestCloudflareRemoveRollsBackWhenDNSConfigNeedsToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		fmt.Fprint(w, `{"success":true,"result":{"status":"active"}}`)
+	}))
+	defer server.Close()
+	app, _, _ := newTestApp(t, "secret-token\n")
+	app.Cloudflare = true
+	t.Setenv("CADDYCTL_CLOUDFLARE_VERIFY_URL", server.URL)
+	runOK(t, app, "cloudflare", "set")
+	runOK(t, app, "add", "dns.example.com", "3000", "--dns-only", "--skip-dns-check")
+
+	invalidCaddy := filepath.Join(app.Paths.Root, "reject-missing-token")
+	script := `#!/bin/sh
+case "$CLOUDFLARE_API_TOKEN" in
+  secret-token) exit 0 ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(invalidCaddy, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app.CaddyBin = invalidCaddy
+	if err := app.Run([]string{"cloudflare", "remove"}); err == nil {
+		t.Fatal("Cloudflare removal unexpectedly succeeded with DNS-only site")
+	}
+	if token, err := readCloudflareToken(app.Paths.CloudflareEnv); err != nil || token != "secret-token" {
+		t.Fatalf("Cloudflare env was not restored: token=%q err=%v", token, err)
+	}
+}
+
 func TestDoctorAndCertCheckValidation(t *testing.T) {
 	app, out, _ := newTestApp(t, "")
 	runOK(t, app, "doctor")
 	if !strings.Contains(out.String(), "===== 环境检查 =====") {
 		t.Fatal("doctor output missing environment header")
 	}
+	for _, section := range []string{"===== CLI / 布局 =====", "===== 端口监听 =====", "===== 本地上游 =====", "===== TLS 文件引用 =====", "===== nginx 迁移覆盖 ====="} {
+		if !strings.Contains(out.String(), section) {
+			t.Errorf("doctor output missing %q", section)
+		}
+	}
 	if err := app.Run([]string{"cert-check", "bad-domain"}); err == nil {
 		t.Fatal("cert-check accepted an invalid domain")
-	}
-}
-
-func TestEmptyCommandShowsGoHelp(t *testing.T) {
-	app, out, _ := newTestApp(t, "")
-	runOK(t, app)
-	if !strings.Contains(out.String(), "c add <域名> <端口>") {
-		t.Fatal("empty command did not show Go help")
 	}
 }
 
@@ -184,6 +211,11 @@ func TestCommandClassification(t *testing.T) {
 	if knownCommand("definitely-unknown") {
 		t.Fatal("unknown command was classified as known")
 	}
+	for _, command := range []string{"install", "install-self", "self-install"} {
+		if !knownCommand(command) {
+			t.Errorf("%s should be a known command", command)
+		}
+	}
 }
 
 func TestReadOnlyStateQueriesDoNotCreateSnapshots(t *testing.T) {
@@ -195,6 +227,26 @@ func TestReadOnlyStateQueriesDoNotCreateSnapshots(t *testing.T) {
 	}
 	if _, err := os.Stat(app.Paths.Snapshots); !os.IsNotExist(err) {
 		t.Fatalf("read-only queries created snapshot storage: %v", err)
+	}
+}
+
+func TestIsolatedRootRejectsServiceActionsAndReadsMappedLogs(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	for _, action := range []string{"start", "restart", "stop", "status"} {
+		if err := app.Run([]string{action}); err == nil || !strings.Contains(err.Error(), "隔离模式") {
+			t.Errorf("%s should be rejected in isolated mode: %v", action, err)
+		}
+	}
+	logPath := filepath.Join(app.Paths.Root, "var/log/caddy/caddy.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("isolated-log-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, app, "logs")
+	if !strings.Contains(out.String(), "isolated-log-line") {
+		t.Fatalf("mapped log was not read: %s", out.String())
 	}
 }
 
@@ -213,6 +265,70 @@ func TestEmailWithoutArgumentRejectsMissingInput(t *testing.T) {
 	app, _, _ := newTestApp(t, "")
 	if err := app.Run([]string{"email"}); err == nil {
 		t.Fatal("email command cleared state without reading input")
+	}
+}
+
+func TestPendingImportMigratesExistingCaddyfileOnce(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	if err := os.MkdirAll(filepath.Dir(app.Paths.Caddyfile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	live := "legacy.example.com {\n    reverse_proxy 127.0.0.1:3000\n}\n"
+	if err := os.WriteFile(app.Paths.Caddyfile, []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(app.Paths.PendingImport, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, app, "list")
+	if _, err := os.Stat(app.Paths.PendingImport); !os.IsNotExist(err) {
+		t.Fatalf("pending marker was not removed: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(app.Paths.Sites, "legacy.example.com.conf"))
+	if err != nil || !strings.Contains(string(data), "legacy.example.com") {
+		t.Fatalf("legacy site was not imported: %s err=%v", data, err)
+	}
+	if !strings.Contains(out.String(), "首次自动导入完成") {
+		t.Fatalf("automatic import was not reported: %s", out.String())
+	}
+}
+
+func TestPendingImportDoesNotOverwritePopulatedSites(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	runOK(t, app, "add", "keep.example.com", "3000", "--skip-dns-check")
+	live := "inline.example.com {\n    reverse_proxy 127.0.0.1:4000\n}\n"
+	if err := os.WriteFile(app.Paths.Caddyfile, []byte(live), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(app.Paths.PendingImport, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, app, "list")
+	if _, err := os.Stat(filepath.Join(app.Paths.Sites, "keep.example.com.conf")); err != nil {
+		t.Fatalf("existing site was overwritten: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(app.Paths.Sites, "inline.example.com.conf")); !os.IsNotExist(err) {
+		t.Fatalf("inline site should not have been auto-imported: %v", err)
+	}
+	if !strings.Contains(out.String(), "sites.d 已有站点") {
+		t.Fatalf("cancelled import was not reported: %s", out.String())
+	}
+}
+
+func TestVersionDoesNotConsumePendingImport(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	if err := os.MkdirAll(filepath.Dir(app.Paths.Caddyfile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(app.Paths.Caddyfile, []byte("legacy.example.com {\n    respond ok\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(app.Paths.PendingImport, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runOK(t, app, "version")
+	if _, err := os.Stat(app.Paths.PendingImport); err != nil {
+		t.Fatalf("version consumed pending import marker: %v", err)
 	}
 }
 

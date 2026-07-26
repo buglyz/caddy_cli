@@ -55,6 +55,7 @@ func (a *App) doctor() error {
 			fmt.Fprintln(a.Out, "[WARN] Cloudflare API Token 未配置")
 		}
 	}
+	a.doctorLayout()
 
 	fmt.Fprintln(a.Out, "\n===== 配置检查 =====")
 	if err := a.assertManaged(); err != nil {
@@ -71,6 +72,7 @@ func (a *App) doctor() error {
 	} else {
 		fmt.Fprintln(a.Out, "[OK] managed 配置校验通过")
 	}
+	a.doctorRuntime(rendered)
 	return nil
 }
 
@@ -103,6 +105,7 @@ func (a *App) certCheck(args []string) error {
 			fmt.Fprintf(a.Out, "[OK] %s 可达，状态码: %d\n", strings.ToUpper(scheme), status)
 		}
 	}
+	a.printCertificateLogs()
 	return nil
 }
 
