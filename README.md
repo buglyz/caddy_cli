@@ -12,10 +12,12 @@
 - `sites.d` / `globals.d` 受管配置渲染
 - Caddy 配置校验、应用及 systemd/OpenRC 服务控制
 - 全局并发锁、操作前快照、失败恢复和 `undo`
+- 新旧快照完整性校验和事务式恢复，失败时不会留下半恢复状态
 - Caddyfile 覆盖/合并导入
 - Cloudflare DNS-01 Token 与 per-site `--dns-only`
 - 环境诊断、证书检查、日志和本地上游健康检查
 - 经 SHA256 校验的 release 安装和原生自更新
+- 严格的命令参数校验，不适用于当前站点类型的选项会直接报错
 
 ## 安装
 
@@ -89,7 +91,7 @@ Cloudflare 版：
 sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
 ```
 
-安装器会：
+安装器会先下载并校验 caddyctl 资产；校验失败时不会安装 Caddy、创建配置目录或替换现有 CLI。校验通过后会：
 
 1. 检测 Debian/Ubuntu 或 Alpine；
 2. Caddy 缺失时，通过官方软件源安装、初始化受管 Caddyfile 并配置服务；
@@ -183,10 +185,12 @@ sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 ## 安全机制
 
 - 写操作需要 root；只读命令支持非 root 尽力检查
+- `version`、`timeout` 查询和 `upstream-mode` 查询不会创建目录或快照
 - 写操作前确认 live Caddyfile 与受管渲染一致，防止覆盖未知配置
 - 配置先生成、检查本地上游、执行 `caddy validate`，再原子替换
 - apply/reload 失败会恢复站点文件、状态和 live Caddyfile
 - 锁目录与锁文件拒绝符号链接和非当前用户属主
+- 快照会先核对目录、manifest 及声明文件，再以事务方式恢复站点、全局配置和状态
 - 默认保留最近 30 个快照，支持旧 Shell 快照格式恢复
 - `add-gateway` 默认必须提供 allow-list；开放代理必须显式使用 `--unsafe-open-proxy`
 

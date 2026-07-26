@@ -9,12 +9,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
 )
 
 var Version = "dev"
+
+var (
+	releaseRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
+	repositoryRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+)
 
 func (a *App) updateCommand(args []string) error {
 	version := getenv("CADDYCTL_GO_VERSION", "latest")
@@ -34,6 +40,9 @@ func (a *App) updateCommand(args []string) error {
 			return fmt.Errorf("未知 update 参数: %s", args[i])
 		}
 	}
+	if !validReleaseRef(version) {
+		return fmt.Errorf("release tag 不合法")
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("定位当前二进制: %w", err)
@@ -52,15 +61,18 @@ func updateBinary(destination, version string) error {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return fmt.Errorf("暂不支持更新平台: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
+	if !validReleaseRef(version) {
+		return fmt.Errorf("release tag 不合法")
+	}
 	repository := getenv("CADDYCTL_GO_REPOSITORY", "buglyz/caddy_cli")
 	base := strings.TrimSuffix(os.Getenv("CADDYCTL_GO_RELEASE_BASE_URL"), "/")
 	if base == "" {
+		if !validRepository(repository) {
+			return fmt.Errorf("GitHub 仓库名不合法")
+		}
 		if version == "latest" {
 			base = "https://github.com/" + repository + "/releases/latest/download"
 		} else {
-			if strings.ContainsAny(version, "/\\\r\n") {
-				return fmt.Errorf("release tag 不合法")
-			}
 			base = "https://github.com/" + repository + "/releases/download/" + version
 		}
 	}
@@ -116,6 +128,18 @@ func updateBinary(destination, version string) error {
 		return fmt.Errorf("替换当前二进制: %w", err)
 	}
 	return nil
+}
+
+func validReleaseRef(value string) bool {
+	return value != "." && value != ".." && releaseRefRE.MatchString(value)
+}
+
+func validRepository(value string) bool {
+	if !repositoryRE.MatchString(value) {
+		return false
+	}
+	owner, name, _ := strings.Cut(value, "/")
+	return owner != "." && owner != ".." && name != "." && name != ".."
 }
 
 func downloadReleaseFile(url string, limit int64) ([]byte, error) {

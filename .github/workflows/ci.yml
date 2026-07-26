@@ -59,13 +59,27 @@ jobs:
           set -euo pipefail
           root="$(mktemp -d)"
           trap 'rm -rf "$root"' EXIT
-          mkdir -p "$root/release" "$root/bin"
+          mkdir -p "$root/release" "$root/bad-release" "$root/bin"
           install -m 0755 /tmp/caddyctl-amd64 "$root/release/caddyctl-linux-amd64"
           (
             cd "$root/release"
             sha256sum caddyctl-linux-amd64 > caddyctl-checksums.txt
           )
           install -m 0755 /bin/true "$root/bin/caddyctl"
+          install -m 0755 /tmp/caddyctl-amd64 "$root/bad-release/caddyctl-linux-amd64"
+          printf '%064d  caddyctl-linux-amd64\n' 0 > "$root/bad-release/caddyctl-checksums.txt"
+          before="$(sha256sum "$root/bin/caddyctl")"
+          if CADDYCTL_GO_BIN_DIR="$root/bin" \
+            CADDYCTL_GO_CF_MARKER="$root/etc/caddy/.caddyctl-cloudflare" \
+            CADDYCTL_GO_CONFIG_DIR="$root/etc/caddy" \
+            CADDYCTL_GO_LOG_DIR="$root/var/log/caddy" \
+            CADDYCTL_GO_RELEASE_BASE_URL="file://$root/bad-release" \
+              bash install-go.sh; then
+            echo "installer accepted an invalid checksum" >&2
+            exit 1
+          fi
+          test "$(sha256sum "$root/bin/caddyctl")" = "$before"
+          test ! -e "$root/etc/caddy"
           CADDYCTL_GO_BIN_DIR="$root/bin" \
           CADDYCTL_GO_CF_MARKER="$root/etc/caddy/.caddyctl-cloudflare" \
           CADDYCTL_GO_CONFIG_DIR="$root/etc/caddy" \

@@ -1,6 +1,7 @@
 package caddyctl
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,11 +23,14 @@ func (a *App) Run(args []string) error {
 		a.help()
 		return nil
 	}
-	readOnly := readOnlyCommand(cmd) || cloudflareReadOnly(cmd, args)
+	if !knownCommand(cmd) {
+		return fmt.Errorf("未知命令: %s", cmd)
+	}
+	readOnly := readOnlyCommand(cmd, args) || cloudflareReadOnly(cmd, args)
 	if !readOnly && os.Geteuid() != 0 && a.Paths.Root == "" {
 		return fmt.Errorf("请用 root 或 sudo 运行，例如: sudo c")
 	}
-	if !readOnly || os.Geteuid() == 0 || a.Paths.Root != "" {
+	if !readOnly {
 		if err := a.ensureDirs(); err != nil {
 			return err
 		}
@@ -62,8 +66,14 @@ func (a *App) Run(args []string) error {
 	case "email":
 		return a.mutate("email", func() error { return a.setEmail(args) })
 	case "timeout":
+		if len(args) == 0 {
+			return a.setTimeout(args)
+		}
 		return a.mutate("timeout", func() error { return a.setTimeout(args) })
 	case "upstream-mode":
+		if len(args) == 0 {
+			return a.setUpstreamMode(args)
+		}
 		return a.mutate("upstream-mode", func() error { return a.setUpstreamMode(args) })
 	case "validate", "check":
 		data, err := a.renderManaged()
@@ -85,12 +95,18 @@ func (a *App) Run(args []string) error {
 		_, err = a.Out.Write(data)
 		return err
 	case "snapshots", "snapshot":
+		if len(args) > 1 {
+			return fmt.Errorf("用法: c snapshots [数量|all]")
+		}
 		limit := ""
 		if len(args) > 0 {
 			limit = args[0]
 		}
 		return a.listSnapshots(limit)
 	case "undo":
+		if len(args) > 1 {
+			return fmt.Errorf("用法: c undo [快照ID]")
+		}
 		requested := "latest"
 		if len(args) > 0 {
 			requested = args[0]
@@ -115,9 +131,8 @@ func (a *App) Run(args []string) error {
 	case "version", "--version":
 		fmt.Fprintln(a.Out, Version)
 		return nil
-	default:
-		return fmt.Errorf("未知命令: %s", cmd)
 	}
+	return nil
 }
 
 func cloudflareReadOnly(cmd string, args []string) bool {
@@ -127,9 +142,26 @@ func cloudflareReadOnly(cmd string, args []string) bool {
 	return len(args) == 0 || args[0] == "" || args[0] == "status" || args[0] == "show" || args[0] == "check"
 }
 
-func readOnlyCommand(cmd string) bool {
+func readOnlyCommand(cmd string, args []string) bool {
 	switch cmd {
-	case "list", "ls", "list-emby", "emby-list", "status", "logs", "snapshots", "snapshot", "config", "cat", "validate", "check", "doctor", "check-env", "cert-check":
+	case "list", "ls", "list-emby", "emby-list", "status", "logs", "snapshots", "snapshot", "config", "cat", "validate", "check", "doctor", "check-env", "cert-check", "version", "--version":
+		return true
+	case "timeout", "upstream-mode":
+		return len(args) == 0
+	default:
+		return false
+	}
+}
+
+func knownCommand(cmd string) bool {
+	switch cmd {
+	case "list", "ls", "list-emby", "emby-list",
+		"add", "add-static", "static", "add-emby", "emby", "add-gateway", "gateway",
+		"set", "set-static", "set-emby", "set-gateway",
+		"rm", "del", "delete", "rm-emby", "del-emby", "delete-emby", "enable", "disable",
+		"email", "timeout", "upstream-mode", "validate", "check", "apply", "reload",
+		"config", "cat", "snapshots", "snapshot", "undo", "start", "restart", "stop", "status", "logs",
+		"doctor", "check-env", "cert-check", "import", "cloudflare", "cf", "update", "version", "--version":
 		return true
 	default:
 		return false
@@ -162,6 +194,9 @@ func (a *App) logs() error {
 }
 
 func (a *App) setTimeout(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("用法: c timeout [秒|default]")
+	}
 	if len(args) == 0 {
 		fmt.Fprintf(a.Out, "当前服务超时: %ds\n", a.State.Timeout)
 		return nil
@@ -179,6 +214,9 @@ func (a *App) setTimeout(args []string) error {
 }
 
 func (a *App) setUpstreamMode(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("用法: c upstream-mode [warn|strict]")
+	}
 	if len(args) == 0 {
 		fmt.Fprintf(a.Out, "当前上游健康检查模式: %s\n", a.State.UpstreamMode)
 		return nil
@@ -191,9 +229,22 @@ func (a *App) setUpstreamMode(args []string) error {
 }
 
 func (a *App) setEmail(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("用法: c email [邮箱]")
+	}
 	email := ""
 	if len(args) > 0 {
 		email = strings.TrimSpace(args[0])
+	} else {
+		fmt.Fprint(a.Out, "请输入邮箱（回车清空）: ")
+		scanner := bufio.NewScanner(a.In)
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("读取邮箱: %w", err)
+			}
+			return fmt.Errorf("未读取到邮箱输入")
+		}
+		email = strings.TrimSpace(scanner.Text())
 	}
 	if !validEmail(email) {
 		return fmt.Errorf("邮箱格式不合法")

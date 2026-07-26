@@ -77,3 +77,26 @@ func TestUpdateBinaryRejectsBadChecksum(t *testing.T) {
 		t.Fatal("destination changed after checksum failure")
 	}
 }
+
+func TestReleaseIdentifiersAreStrictlyValidated(t *testing.T) {
+	for _, value := range []string{"latest", "go-latest", "v0.1.1", "release+build.1"} {
+		if !validReleaseRef(value) {
+			t.Errorf("valid release ref rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"../latest", "v1?download=1", "v1#asset", ".", ""} {
+		if validReleaseRef(value) {
+			t.Errorf("invalid release ref accepted: %q", value)
+		}
+	}
+	for _, value := range []string{"buglyz/caddy_cli", "owner-name/repo.name"} {
+		if !validRepository(value) {
+			t.Errorf("valid repository rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"buglyz", "../repo", "owner/repo/extra", "owner/repo?x"} {
+		if validRepository(value) {
+			t.Errorf("invalid repository accepted: %q", value)
+		}
+	}
+}

@@ -13,9 +13,9 @@ func (a *App) help() {
   c add-emby <域名> <目标> [--http|--https] [--dns-only]
   c add-gateway <域名> --allow <host:port,...> [--http|--https] [--dns-only]
   c set <域名> [--port <端口>] [--path <前缀|off>] [--http|--https] [--dns-only]
-  c set-static <域名> [--root <目录>] [--spa|--no-spa] [--http|--https]
+  c set-static <域名> [--root <目录>] [--spa|--no-spa] [--http|--https] [--dns-only]
   c set-emby <域名> [--target <地址>] [--http|--https] [--dns-only]
-  c set-gateway <域名> [--allow <列表>|--unsafe-open-proxy] [--http|--https]
+  c set-gateway <域名> [--allow <列表>|--unsafe-open-proxy] [--http|--https] [--dns-only]
   c enable|disable|rm <域名>
 
 配置与恢复:

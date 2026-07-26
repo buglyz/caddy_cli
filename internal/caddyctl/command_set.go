@@ -83,6 +83,15 @@ func (a *App) setGateway(args []string) error {
 }
 
 func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
+	if !flags.hasChanges() {
+		return fmt.Errorf("未提供任何修改参数")
+	}
+	if err := validateSetFlags(flags, kind); err != nil {
+		return err
+	}
+	if flags.dnsTLS && !a.Cloudflare {
+		return fmt.Errorf("--dns-only 需要安装包含 dns.providers.cloudflare 的 Cloudflare 版 Caddy")
+	}
 	opts, err := optionsFromSite(site)
 	if err != nil {
 		return err
@@ -90,9 +99,6 @@ func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
 	opts, err = mergeSetFlags(opts, flags)
 	if err != nil {
 		return err
-	}
-	if !a.Cloudflare {
-		opts.DNSTLS = false
 	}
 	if kind == SiteProxy || kind == SitePath {
 		if !validPort(opts.Port) {
@@ -124,6 +130,28 @@ func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
 		return err
 	}
 	fmt.Fprintf(a.Out, "已更新站点: %s\n", opts.Label)
+	return nil
+}
+
+func validateSetFlags(flags setFlags, kind SiteKind) error {
+	switch kind {
+	case SiteProxy, SitePath:
+		if flags.rootSeen || flags.targetSeen || flags.spa != nil || flags.allowSeen || flags.open {
+			return fmt.Errorf("反代站点仅支持 --port、--path、--http、--https 和 --dns-only")
+		}
+	case SiteStatic:
+		if flags.portSeen || flags.pathSeen || flags.targetSeen || flags.allowSeen || flags.open {
+			return fmt.Errorf("静态站点仅支持 --root、--spa、--no-spa、--http、--https 和 --dns-only")
+		}
+	case SiteEmby:
+		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.spa != nil || flags.allowSeen || flags.open {
+			return fmt.Errorf("Emby 站点仅支持 --target、--http、--https 和 --dns-only")
+		}
+	case SiteGateway:
+		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.targetSeen || flags.spa != nil {
+			return fmt.Errorf("网关仅支持 --allow、--unsafe-open-proxy、--http、--https 和 --dns-only")
+		}
+	}
 	return nil
 }
 

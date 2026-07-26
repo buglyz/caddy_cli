@@ -173,17 +173,69 @@ func (a *App) validateSnapshot(path string) error {
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
 		return fmt.Errorf("快照路径不合法")
 	}
-	for _, name := range []string{"sites", "globals", "meta", "manifest"} {
+	for _, name := range []string{"sites", "globals"} {
 		info, statErr := os.Lstat(filepath.Join(clean, name))
-		if statErr != nil || info.Mode()&os.ModeSymlink != 0 {
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("快照结构不完整: %s", filepath.Base(clean))
 		}
 	}
-	values, err := readKeyValues(filepath.Join(clean, "manifest"))
+	for _, name := range []string{"meta"} {
+		info, statErr := os.Lstat(filepath.Join(clean, name))
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("快照结构不完整: %s", filepath.Base(clean))
+		}
+	}
+	if info, statErr := os.Lstat(filepath.Join(clean, "manifest")); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("快照 manifest 不合法")
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("读取快照 manifest: %w", statErr)
+	}
+	values, err := snapshotManifest(clean)
 	if err != nil || values["FORMAT"] != "1" {
 		return fmt.Errorf("快照 manifest 不合法")
 	}
+	for _, item := range []struct{ key, name string }{{"STATE_PRESENT", "state.conf"}, {"CADDYFILE_PRESENT", "Caddyfile"}} {
+		present := values[item.key]
+		if present != "0" && present != "1" {
+			return fmt.Errorf("快照 manifest 字段不合法: %s", item.key)
+		}
+		if present == "1" {
+			info, statErr := os.Lstat(filepath.Join(clean, item.name))
+			if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				return fmt.Errorf("快照声明的文件缺失或不安全: %s", item.name)
+			}
+		}
+	}
 	return nil
+}
+
+func snapshotManifest(path string) (map[string]string, error) {
+	manifest := filepath.Join(path, "manifest")
+	values, err := readKeyValues(manifest)
+	if err == nil {
+		return values, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if info, stateErr := os.Lstat(filepath.Join(path, "state.conf")); stateErr != nil ||
+		info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("旧版快照缺少安全的 state.conf")
+	}
+	caddyfilePresent := "0"
+	if info, caddyErr := os.Lstat(filepath.Join(path, "Caddyfile")); caddyErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("旧版快照 Caddyfile 不安全")
+		}
+		caddyfilePresent = "1"
+	} else if !errors.Is(caddyErr, os.ErrNotExist) {
+		return nil, caddyErr
+	}
+	return map[string]string{
+		"FORMAT": "1", "STATE_PRESENT": "1", "CADDYFILE_PRESENT": caddyfilePresent,
+	}, nil
 }
 
 func readKeyValues(path string) (map[string]string, error) {
@@ -207,21 +259,11 @@ func (a *App) restoreSnapshot(path string) error {
 	if err := a.validateSnapshot(path); err != nil {
 		return err
 	}
-	manifest, err := readKeyValues(filepath.Join(path, "manifest"))
+	manifest, err := snapshotManifest(path)
 	if err != nil {
 		return err
 	}
-	if err := replaceDir(filepath.Join(path, "sites"), a.Paths.Sites); err != nil {
-		return fmt.Errorf("恢复站点目录: %w", err)
-	}
-	if err := replaceDir(filepath.Join(path, "globals"), a.Paths.Globals); err != nil {
-		return fmt.Errorf("恢复全局目录: %w", err)
-	}
-	if manifest["STATE_PRESENT"] == "1" {
-		if err := copyFile(filepath.Join(path, "state.conf"), a.Paths.State, 0o644); err != nil {
-			return fmt.Errorf("恢复状态文件: %w", err)
-		}
-	} else if err := os.Remove(a.Paths.State); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := a.restoreSnapshotFiles(path, manifest); err != nil {
 		return err
 	}
 	return a.loadState()
@@ -238,12 +280,19 @@ func (a *App) undo(requested string) error {
 			return fmt.Errorf("创建回滚保护快照: %w", err)
 		}
 		if err := a.restoreSnapshot(target); err != nil {
+			if restoreErr := a.restoreSnapshot(guard); restoreErr != nil {
+				return fmt.Errorf("恢复目标快照失败: %v；且恢复保护快照失败: %w（保护快照已保留: %s）", err, restoreErr, filepath.Base(guard))
+			}
 			_ = os.RemoveAll(guard)
 			return err
 		}
 		if err := a.apply(); err != nil {
-			_ = a.restoreSnapshot(guard)
-			_ = a.apply()
+			if restoreErr := a.restoreSnapshot(guard); restoreErr != nil {
+				return fmt.Errorf("回滚后应用失败: %v；且恢复保护快照失败: %w（保护快照已保留: %s）", err, restoreErr, filepath.Base(guard))
+			}
+			if applyErr := a.apply(); applyErr != nil {
+				return fmt.Errorf("回滚后应用失败: %v；已恢复文件但重新应用原配置失败: %w（保护快照已保留: %s）", err, applyErr, filepath.Base(guard))
+			}
 			_ = os.RemoveAll(guard)
 			return fmt.Errorf("回滚后应用失败，已恢复回滚前状态: %w", err)
 		}

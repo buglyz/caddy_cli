@@ -67,6 +67,10 @@ func validPathPrefix(value string) bool {
 	return strings.HasPrefix(value, "/") && value != "/" && !strings.ContainsAny(value, " \t\r\n{}\"';#\\")
 }
 
+func validStaticRoot(value string) bool {
+	return strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n")
+}
+
 func normalizePathPrefix(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimSuffix(value, "*")

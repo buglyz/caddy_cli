@@ -10,6 +10,7 @@ type addFlags struct {
 	positional                 []string
 	scheme, path, allow        string
 	spa, dnsTLS, skipDNS, open bool
+	pathSeen, allowSeen        bool
 }
 
 func parseAddFlags(args []string, command string) (addFlags, error) {
@@ -34,9 +35,9 @@ func parseAddFlags(args []string, command string) (addFlags, error) {
 			}
 			i++
 			if args[i-1] == "--path" {
-				result.path = args[i]
+				result.path, result.pathSeen = args[i], true
 			} else {
-				result.allow = args[i]
+				result.allow, result.allowSeen = args[i], true
 			}
 		case "--":
 			result.positional = append(result.positional, args[i+1:]...)
@@ -49,9 +50,11 @@ func parseAddFlags(args []string, command string) (addFlags, error) {
 		}
 	}
 	if result.scheme == "http" {
-		result.dnsTLS = false
+		if result.dnsTLS {
+			return result, fmt.Errorf("--dns-only 不能与 --http 或 --no-ssl 同时使用")
+		}
 	}
-	if result.allow != "" && result.open {
+	if result.allowSeen && result.open {
 		return result, fmt.Errorf("--allow 与 --unsafe-open-proxy 不能同时使用")
 	}
 	return result, nil
@@ -62,8 +65,14 @@ func (a *App) addProxy(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) < 2 {
+	if len(flags.positional) != 2 {
 		return fmt.Errorf("用法: c add <域名> <端口> [--path <前缀>]")
+	}
+	if flags.spa || flags.allowSeen || flags.open {
+		return fmt.Errorf("add 不支持 --spa、--allow 或 --unsafe-open-proxy")
+	}
+	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
+		return err
 	}
 	label, port := strings.TrimSpace(flags.positional[0]), flags.positional[1]
 	if !validSiteLabel(label) {
@@ -73,7 +82,7 @@ func (a *App) addProxy(args []string) error {
 		return fmt.Errorf("端口不合法")
 	}
 	kind := SiteProxy
-	if flags.path != "" {
+	if flags.pathSeen {
 		flags.path = normalizePathPrefix(flags.path)
 		if !validPathPrefix(flags.path) {
 			return fmt.Errorf("路径前缀不合法，请使用类似 /api 的形式")
@@ -93,11 +102,17 @@ func (a *App) addStatic(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) < 2 {
+	if len(flags.positional) != 2 {
 		return fmt.Errorf("用法: c add-static <域名> <目录> [--spa]")
 	}
+	if flags.pathSeen || flags.allowSeen || flags.open {
+		return fmt.Errorf("add-static 不支持 --path、--allow 或 --unsafe-open-proxy")
+	}
+	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
+		return err
+	}
 	label, root := strings.TrimSpace(flags.positional[0]), strings.TrimSpace(flags.positional[1])
-	if !validSiteLabel(label) || root == "" || strings.ContainsAny(root, "\r\n") {
+	if !validSiteLabel(label) || !validStaticRoot(root) {
 		return fmt.Errorf("站点地址或静态目录不合法")
 	}
 	if !flags.skipDNS {
@@ -113,8 +128,14 @@ func (a *App) addEmby(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) < 2 {
+	if len(flags.positional) != 2 {
 		return fmt.Errorf("用法: c add-emby <域名> <目标>")
+	}
+	if flags.pathSeen || flags.spa || flags.allowSeen || flags.open {
+		return fmt.Errorf("add-emby 不支持 --path、--spa、--allow 或 --unsafe-open-proxy")
+	}
+	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
+		return err
 	}
 	label, target := strings.TrimSpace(flags.positional[0]), strings.TrimSpace(flags.positional[1])
 	if !validDomain(label) {
@@ -139,15 +160,21 @@ func (a *App) addGateway(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) < 1 {
+	if len(flags.positional) != 1 {
 		return fmt.Errorf("用法: c add-gateway <域名> --allow <host:port,...>")
+	}
+	if flags.pathSeen || flags.spa {
+		return fmt.Errorf("add-gateway 不支持 --path 或 --spa")
+	}
+	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
+		return err
 	}
 	label := strings.TrimSpace(flags.positional[0])
 	if !validDomain(label) {
 		return fmt.Errorf("域名不合法")
 	}
 	var allow []string
-	if flags.allow != "" {
+	if flags.allowSeen {
 		allow, err = parseGatewayAllow(flags.allow)
 		if err != nil {
 			return err
@@ -164,6 +191,9 @@ func (a *App) addGateway(args []string) error {
 }
 
 func (a *App) createSite(label string, kind SiteKind, opts SiteOptions) error {
+	if err := a.validateDNSFlag(opts.DNSTLS); err != nil {
+		return err
+	}
 	sites, err := a.allSites()
 	if err != nil {
 		return err
@@ -180,9 +210,6 @@ func (a *App) createSite(label string, kind SiteKind, opts SiteOptions) error {
 	if _, err := os.Stat(path + ".disabled"); err == nil {
 		return fmt.Errorf("禁用配置已存在: %s", path+".disabled")
 	}
-	if !a.Cloudflare {
-		opts.DNSTLS = false
-	}
 	data, err := renderSite(opts, kind)
 	if err != nil {
 		return err
@@ -191,5 +218,12 @@ func (a *App) createSite(label string, kind SiteKind, opts SiteOptions) error {
 		return err
 	}
 	fmt.Fprintf(a.Out, "已添加%s: %s\n", kind, label)
+	return nil
+}
+
+func (a *App) validateDNSFlag(enabled bool) error {
+	if enabled && !a.Cloudflare {
+		return fmt.Errorf("--dns-only 需要安装包含 dns.providers.cloudflare 的 Cloudflare 版 Caddy")
+	}
 	return nil
 }

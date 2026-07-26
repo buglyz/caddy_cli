@@ -43,18 +43,32 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	out, err := os.CreateTemp(dir, ".caddyctl-copy-*")
 	if err != nil {
+		return err
+	}
+	tmp := out.Name()
+	defer os.Remove(tmp)
+	if err := out.Chmod(mode); err != nil {
+		out.Close()
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dst)
 }
 
 func copyDir(src, dst string) error {

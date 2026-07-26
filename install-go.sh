@@ -82,15 +82,22 @@ asset_arch() {
 }
 
 release_base_url() {
+    [[ "$VERSION" != "." && "$VERSION" != ".." \
+        && "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]] \
+        || die "invalid release tag"
     if [[ -n "${CADDYCTL_GO_RELEASE_BASE_URL:-}" ]]; then
         printf '%s' "${CADDYCTL_GO_RELEASE_BASE_URL%/}"
         return 0
     fi
+    [[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+        || die "invalid GitHub repository"
+    local owner="${REPOSITORY%%/*}"
+    local name="${REPOSITORY#*/}"
+    [[ "$owner" != "." && "$owner" != ".." && "$name" != "." && "$name" != ".." ]] \
+        || die "invalid GitHub repository"
     if [[ "$VERSION" == "latest" ]]; then
         printf 'https://github.com/%s/releases/latest/download' "$REPOSITORY"
     else
-        [[ "$VERSION" != */* && "$VERSION" != *$'\r'* && "$VERSION" != *$'\n'* ]] \
-            || die "invalid release tag"
         printf 'https://github.com/%s/releases/download/%s' "$REPOSITORY" "$VERSION"
     fi
 }
@@ -128,6 +135,9 @@ check_environment() {
     fi
     if [[ -e "$CLI_BIN" && ! -f "$CLI_BIN" && ! -L "$CLI_BIN" ]]; then
         die "install target is not a file: $CLI_BIN"
+    fi
+    if [[ -e "$CLI_ALIAS" && ! -f "$CLI_ALIAS" && ! -L "$CLI_ALIAS" ]]; then
+        die "CLI alias target is not a file: $CLI_ALIAS"
     fi
 }
 
@@ -321,11 +331,6 @@ main() {
     TEMP_DIR="$(mktemp -d)"
     detect_distro
 
-    install_caddy_if_needed
-    prepare_layout
-    configure_cloudflare
-    configure_service_environment
-
     arch="$(asset_arch)"
     asset="caddyctl-linux-${arch}"
     base="$(release_base_url)"
@@ -338,6 +343,11 @@ main() {
     verify_asset "$binary" "$sums" "$asset"
     chmod 0755 "$binary"
     "$binary" --help >/dev/null
+
+    install_caddy_if_needed
+    prepare_layout
+    configure_cloudflare
+    configure_service_environment
 
     install_cli "$binary"
     initialize_fresh_config

@@ -169,3 +169,94 @@ func TestEmptyCommandShowsGoHelp(t *testing.T) {
 		t.Fatal("empty command did not show Go help")
 	}
 }
+
+func TestCommandClassification(t *testing.T) {
+	for _, command := range []string{"version", "--version"} {
+		if !readOnlyCommand(command, nil) {
+			t.Errorf("%s should be read-only", command)
+		}
+	}
+	for _, command := range []string{"timeout", "upstream-mode"} {
+		if !readOnlyCommand(command, nil) || readOnlyCommand(command, []string{"value"}) {
+			t.Errorf("%s query/update classification is wrong", command)
+		}
+	}
+	if knownCommand("definitely-unknown") {
+		t.Fatal("unknown command was classified as known")
+	}
+}
+
+func TestReadOnlyStateQueriesDoNotCreateSnapshots(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	runOK(t, app, "timeout")
+	runOK(t, app, "upstream-mode")
+	if !strings.Contains(out.String(), "当前服务超时") || !strings.Contains(out.String(), "当前上游健康检查模式") {
+		t.Fatalf("query output is incomplete: %s", out.String())
+	}
+	if _, err := os.Stat(app.Paths.Snapshots); !os.IsNotExist(err) {
+		t.Fatalf("read-only queries created snapshot storage: %v", err)
+	}
+}
+
+func TestEmailWithoutArgumentReadsStdin(t *testing.T) {
+	app, out, _ := newTestApp(t, "admin@example.org\n")
+	runOK(t, app, "email")
+	if app.State.Email != "admin@example.org" {
+		t.Fatalf("email=%q", app.State.Email)
+	}
+	if !strings.Contains(out.String(), "请输入邮箱") {
+		t.Fatalf("interactive prompt missing: %s", out.String())
+	}
+}
+
+func TestEmailWithoutArgumentRejectsMissingInput(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	if err := app.Run([]string{"email"}); err == nil {
+		t.Fatal("email command cleared state without reading input")
+	}
+}
+
+func TestAddRejectsIgnoredArgumentsAndUnsupportedDNS(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	tests := [][]string{
+		{"add", "app.example.com", "3000", "extra", "--skip-dns-check"},
+		{"add", "app.example.com", "3000", "--spa", "--skip-dns-check"},
+		{"add-static", "static.example.com", "/srv/site", "--path", "/api", "--skip-dns-check"},
+		{"add-emby", "emby.example.com", "localhost:8096", "--spa", "--skip-dns-check"},
+		{"add-gateway", "gate.example.com", "--allow", "example.com:443", "--spa", "--skip-dns-check"},
+		{"add", "dns.example.com", "3000", "--dns-only", "--skip-dns-check"},
+	}
+	for _, args := range tests {
+		if err := app.Run(args); err == nil {
+			t.Errorf("run %v unexpectedly succeeded", args)
+		}
+	}
+}
+
+func TestDNSOnlyCannotBeCombinedWithHTTP(t *testing.T) {
+	if _, err := parseAddFlags([]string{"app.example.com", "3000", "--dns-only", "--http"}, "add"); err == nil {
+		t.Fatal("add flags accepted --dns-only with --http")
+	}
+	if _, err := parseSetFlags([]string{"app.example.com", "--dns-only", "--http"}, "set"); err == nil {
+		t.Fatal("set flags accepted --dns-only with --http")
+	}
+}
+
+func TestSetRejectsNoOpAndWrongSiteOptions(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	runOK(t, app, "add-static", "static.example.com", "/srv/site", "--skip-dns-check")
+	for _, args := range [][]string{
+		{"set-static", "static.example.com"},
+		{"set-static", "static.example.com", "--port", "4000"},
+		{"set-static", "static.example.com", "--root", "/srv/site\nrespond hacked"},
+		{"set-static", "static.example.com", "--dns-only"},
+	} {
+		if err := app.Run(args); err == nil {
+			t.Errorf("run %v unexpectedly succeeded", args)
+		}
+	}
+	runOK(t, app, "add", "app.example.com", "3000", "--skip-dns-check")
+	if err := app.Run([]string{"set", "app.example.com", "--target", "https://example.org"}); err == nil {
+		t.Fatal("proxy set accepted an ignored --target option")
+	}
+}

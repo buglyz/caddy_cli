@@ -39,7 +39,7 @@ func (a *App) listSites(embyOnly bool) error {
 }
 
 func (a *App) removeSite(args []string) error {
-	if len(args) == 0 {
+	if len(args) != 1 {
 		return fmt.Errorf("用法: c rm <域名>")
 	}
 	site, err := a.findSite(args[0])
@@ -54,8 +54,8 @@ func (a *App) removeSite(args []string) error {
 }
 
 func (a *App) toggleSite(args []string, enable bool) error {
-	if len(args) == 0 {
-		return fmt.Errorf("站点地址不能为空")
+	if len(args) != 1 {
+		return fmt.Errorf("用法: c %s <域名>", map[bool]string{true: "enable", false: "disable"}[enable])
 	}
 	site, err := a.findSite(args[0])
 	if err != nil {
@@ -86,6 +86,8 @@ type setFlags struct {
 	query, port, path, root, target, allow string
 	scheme, spa                            *string
 	dnsTLS, open, allowSeen                bool
+	portSeen, pathSeen, rootSeen           bool
+	targetSeen                             bool
 }
 
 func parseSetFlags(args []string, command string) (setFlags, error) {
@@ -120,13 +122,13 @@ func parseSetFlags(args []string, command string) (setFlags, error) {
 			i++
 			switch arg {
 			case "--port":
-				result.port = args[i]
+				result.port, result.portSeen = args[i], true
 			case "--path":
-				result.path = args[i]
+				result.path, result.pathSeen = args[i], true
 			case "--root":
-				result.root = args[i]
+				result.root, result.rootSeen = args[i], true
 			case "--target":
-				result.target = args[i]
+				result.target, result.targetSeen = args[i], true
 			case "--allow":
 				result.allow, result.allowSeen = args[i], true
 			}
@@ -137,7 +139,15 @@ func parseSetFlags(args []string, command string) (setFlags, error) {
 	if result.open && result.allowSeen {
 		return result, fmt.Errorf("--allow 与 --unsafe-open-proxy 不能同时使用")
 	}
+	if result.dnsTLS && result.scheme != nil && *result.scheme == "http" {
+		return result, fmt.Errorf("--dns-only 不能与 --http 或 --no-ssl 同时使用")
+	}
 	return result, nil
+}
+
+func (flags setFlags) hasChanges() bool {
+	return flags.scheme != nil || flags.spa != nil || flags.dnsTLS || flags.open || flags.allowSeen ||
+		flags.portSeen || flags.pathSeen || flags.rootSeen || flags.targetSeen
 }
 
 func optionsFromSite(site siteFile) (SiteOptions, error) {
@@ -200,13 +210,13 @@ func mergeSetFlags(opts SiteOptions, flags setFlags) (SiteOptions, error) {
 	} else if flags.dnsTLS {
 		opts.DNSTLS = true
 	}
-	if flags.port != "" {
+	if flags.portSeen {
 		if !validPort(flags.port) {
 			return opts, fmt.Errorf("端口不合法")
 		}
 		opts.Port = flags.port
 	}
-	if flags.path != "" {
+	if flags.pathSeen {
 		switch flags.path {
 		case "none", "off", "disable":
 			opts.Path = ""
@@ -218,10 +228,13 @@ func mergeSetFlags(opts SiteOptions, flags setFlags) (SiteOptions, error) {
 			opts.Path = flags.path
 		}
 	}
-	if flags.root != "" {
+	if flags.rootSeen {
+		if !validStaticRoot(flags.root) {
+			return opts, fmt.Errorf("静态目录不合法")
+		}
 		opts.Root = flags.root
 	}
-	if flags.target != "" {
+	if flags.targetSeen {
 		if !strings.Contains(flags.target, "://") {
 			flags.target = opts.Scheme + "://" + flags.target
 		}
