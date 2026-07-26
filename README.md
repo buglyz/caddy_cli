@@ -1,9 +1,48 @@
-# Caddy CLI 管理脚本
+# Caddy CLI 管理工具
 
-一个面向服务器运维的 Caddy 管理脚本集合，采用**共享库 + 前端**架构，消除重复代码。支持 **Debian/Ubuntu** 和 **Alpine Linux**，需要 **Bash 4.0+**。
+一个面向服务器运维的 Caddy 管理 CLI。当前 `refactor/go` 分支正在把日常运行时从 Bash 迁移为 Go 单文件二进制，同时保留 Shell 兼容入口处理安装、自更新和交互菜单。支持 **Debian/Ubuntu** 和 **Alpine Linux**。
+
+## Go 重构版
+
+Go 版已经原生覆盖站点增删改查、静态站、Emby、通用网关、Caddyfile 渲染/校验/应用、并发锁、快照、回滚、导入、服务控制、Cloudflare Token 管理和 release 自更新。`install`、`install-self` 与交互菜单暂时转交保留的 `caddyctl-legacy`，避免重写发行版包管理逻辑。
+
+本地构建与验证：
+
+```bash
+make check
+make build
+./bin/caddyctl --help
+```
+
+测试时可把所有 `/etc/caddy`、日志和锁路径映射到临时根目录：
+
+```bash
+root="$(mktemp -d)"
+CADDYCTL_ROOT="$root" CADDYCTL_SKIP_DNS_CHECK=1 CADDYCTL_NO_RELOAD=1 \
+  ./bin/caddyctl add app.example.com 3000
+```
+
+发布 tag 后，GitHub Actions 会生成静态的 `linux/amd64`、`linux/arm64` 二进制及 SHA256 文件。先安装原 Shell 版，再切换 Go 运行时：
+
+```bash
+sudo CADDYCTL_GO_VERSION=vX.Y.Z bash install-go.sh
+# Cloudflare 版：
+sudo CADDYCTL_GO_VERSION=vX.Y.Z bash install-go.sh --cloudflare
+```
+
+安装器会先完成 SHA256 校验和 `--help` 自检，再切换 `/usr/local/bin/c`；原入口保留为 `/usr/local/bin/caddyctl-legacy`。回滚只需：
+
+```bash
+sudo ln -sfn /usr/local/bin/caddyctl-legacy /usr/local/bin/caddyctl
+```
+
+现有稳定版 Shell 安装方式继续保留如下。
 
 | 文件 | 说明 |
 |------|------|
+| `cmd/caddyctl` | Go CLI 入口 |
+| `internal/caddyctl` | Go 原生站点、配置、锁、快照、导入和服务实现 |
+| `install-go.sh` | 校验 release 二进制并安全切换 Go 运行时 |
 | `caddy-lib.sh` | 共享库入口（加载 `lib/*.sh` 模块） |
 | `lib/*.sh` | 按职责拆分的共享模块（core/validate/config/service/sites/cmds…） |
 | `caddy.sh` | 标准版前端（source 共享库） |
@@ -258,4 +297,3 @@ sudo c import --force /etc/caddy/Caddyfile
 # 已有 sites.d 时合并
 sudo c import --merge /etc/caddy/Caddyfile
 ```
-

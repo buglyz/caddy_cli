@@ -1,0 +1,230 @@
+package caddyctl
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+)
+
+func (a *App) Run(args []string) error {
+	cmd := ""
+	if len(args) > 0 {
+		cmd = args[0]
+		args = args[1:]
+	}
+	if cmd == "help" || cmd == "-h" || cmd == "--help" {
+		a.help()
+		return nil
+	}
+	if cmd == "" || cmd == "menu" {
+		return a.runLegacy(cmd, args)
+	}
+	readOnly := readOnlyCommand(cmd) || cloudflareReadOnly(cmd, args)
+	if !readOnly && os.Geteuid() != 0 && a.Paths.Root == "" {
+		return fmt.Errorf("请用 root 或 sudo 运行，例如: sudo c")
+	}
+	if !readOnly || os.Geteuid() == 0 || a.Paths.Root != "" {
+		if err := a.ensureDirs(); err != nil {
+			return err
+		}
+	}
+	if err := a.loadState(); err != nil {
+		return err
+	}
+	switch cmd {
+	case "list", "ls":
+		return a.listSites(false)
+	case "list-emby", "emby-list":
+		return a.listSites(true)
+	case "add":
+		return a.mutate("add", func() error { return a.addProxy(args) })
+	case "add-static", "static":
+		return a.mutate("add-static", func() error { return a.addStatic(args) })
+	case "add-emby", "emby":
+		return a.mutate("add-emby", func() error { return a.addEmby(args) })
+	case "add-gateway", "gateway":
+		return a.mutate("add-gateway", func() error { return a.addGateway(args) })
+	case "set":
+		return a.mutate("set", func() error { return a.setSite(args) })
+	case "set-static":
+		return a.mutate("set-static", func() error { return a.setStatic(args) })
+	case "set-emby":
+		return a.mutate("set-emby", func() error { return a.setEmby(args) })
+	case "set-gateway":
+		return a.mutate("set-gateway", func() error { return a.setGateway(args) })
+	case "rm", "del", "delete", "rm-emby", "del-emby", "delete-emby":
+		return a.mutate("rm", func() error { return a.removeSite(args) })
+	case "enable", "disable":
+		return a.mutate(cmd, func() error { return a.toggleSite(args, cmd == "enable") })
+	case "email":
+		return a.mutate("email", func() error { return a.setEmail(args) })
+	case "timeout":
+		return a.mutate("timeout", func() error { return a.setTimeout(args) })
+	case "upstream-mode":
+		return a.mutate("upstream-mode", func() error { return a.setUpstreamMode(args) })
+	case "validate", "check":
+		data, err := a.renderManaged()
+		if err != nil {
+			return err
+		}
+		if err := a.validate(data); err != nil {
+			return err
+		}
+		fmt.Fprintln(a.Out, "配置校验通过")
+		return nil
+	case "apply", "reload":
+		return a.mutate("apply", a.apply)
+	case "config", "cat":
+		data, err := os.ReadFile(a.Paths.Caddyfile)
+		if err != nil {
+			return err
+		}
+		_, err = a.Out.Write(data)
+		return err
+	case "snapshots", "snapshot":
+		limit := ""
+		if len(args) > 0 {
+			limit = args[0]
+		}
+		return a.listSnapshots(limit)
+	case "undo":
+		requested := "latest"
+		if len(args) > 0 {
+			requested = args[0]
+		}
+		return a.undo(requested)
+	case "start", "restart", "stop":
+		return a.serviceCommand(cmd)
+	case "status":
+		return a.serviceCommand("status")
+	case "logs":
+		return a.logs()
+	case "doctor", "check-env":
+		return a.doctor()
+	case "cert-check":
+		return a.certCheck(args)
+	case "import":
+		return a.importCommand(args)
+	case "cloudflare", "cf":
+		return a.cloudflareCommand(args)
+	case "update":
+		return a.withLock(func() error { return a.updateCommand(args) })
+	case "version", "--version":
+		fmt.Fprintln(a.Out, Version)
+		return nil
+	case "install", "install-self", "self-install":
+		return a.runLegacy(cmd, args)
+	default:
+		return fmt.Errorf("未知命令: %s", cmd)
+	}
+}
+
+func cloudflareReadOnly(cmd string, args []string) bool {
+	if cmd != "cloudflare" && cmd != "cf" {
+		return false
+	}
+	return len(args) == 0 || args[0] == "" || args[0] == "status" || args[0] == "show" || args[0] == "check"
+}
+
+func readOnlyCommand(cmd string) bool {
+	switch cmd {
+	case "list", "ls", "list-emby", "emby-list", "status", "logs", "snapshots", "snapshot", "config", "cat", "validate", "check", "doctor", "check-env", "cert-check":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) runLegacy(cmd string, args []string) error {
+	path := os.Getenv("CADDYCTL_LEGACY")
+	if path == "" {
+		path = "/usr/local/bin/caddyctl-legacy"
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("该生命周期命令仍由兼容入口处理，但未找到 %s", path)
+	}
+	all := args
+	if cmd != "" {
+		all = append([]string{cmd}, args...)
+	}
+	command := exec.Command(path, all...)
+	command.Stdin, command.Stdout, command.Stderr = a.In, a.Out, a.Err
+	return command.Run()
+}
+
+func (a *App) serviceCommand(action string) error {
+	backend := serviceBackend()
+	if backend == "" {
+		return fmt.Errorf("未检测到 service manager")
+	}
+	if action == "status" {
+		if backend == "systemd" {
+			cmd := exec.Command("systemctl", "status", "caddy", "--no-pager")
+			cmd.Stdout, cmd.Stderr = a.Out, a.Err
+			return cmd.Run()
+		}
+		return runServiceCommand(a.State.Timeout, backend, "is-active")
+	}
+	return a.withLock(func() error { return runServiceCommand(a.State.Timeout, backend, action) })
+}
+
+func (a *App) logs() error {
+	if _, err := exec.LookPath("journalctl"); err == nil {
+		cmd := exec.Command("journalctl", "-u", "caddy", "-n", "120", "--no-pager")
+		cmd.Stdout, cmd.Stderr = a.Out, a.Err
+		return cmd.Run()
+	}
+	return fmt.Errorf("未检测到 journalctl")
+}
+
+func (a *App) setTimeout(args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(a.Out, "当前服务超时: %ds\n", a.State.Timeout)
+		return nil
+	}
+	value := args[0]
+	if value == "default" {
+		value = strconv.Itoa(defaultTimeout)
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 || n > 600 {
+		return fmt.Errorf("超时必须是 1-600 秒内的整数")
+	}
+	a.State.Timeout = n
+	return a.saveState()
+}
+
+func (a *App) setUpstreamMode(args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(a.Out, "当前上游健康检查模式: %s\n", a.State.UpstreamMode)
+		return nil
+	}
+	if args[0] != "warn" && args[0] != "strict" {
+		return fmt.Errorf("模式仅支持 warn 或 strict")
+	}
+	a.State.UpstreamMode = args[0]
+	return a.saveState()
+}
+
+func (a *App) setEmail(args []string) error {
+	email := ""
+	if len(args) > 0 {
+		email = strings.TrimSpace(args[0])
+	}
+	if !validEmail(email) {
+		return fmt.Errorf("邮箱格式不合法")
+	}
+	old := a.State.Email
+	a.State.Email = email
+	if err := a.saveState(); err != nil {
+		return err
+	}
+	if err := a.apply(); err != nil {
+		a.State.Email = old
+		_ = a.saveState()
+		return err
+	}
+	return nil
+}

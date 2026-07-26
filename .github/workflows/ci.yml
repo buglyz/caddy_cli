@@ -9,6 +9,31 @@ permissions:
   contents: read
 
 jobs:
+  go:
+    name: Go tests and static build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Formatting
+        run: test -z "$(gofmt -l cmd internal)"
+
+      - name: Test and vet
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Static builds
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/caddyctl-amd64 ./cmd/caddyctl
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/caddyctl-arm64 ./cmd/caddyctl
+
   shellcheck:
     name: Bash syntax and ShellCheck
     runs-on: ubuntu-latest
@@ -31,6 +56,7 @@ jobs:
             caddy-cloudflare.sh
             install.sh
             install-cloudflare.sh
+            install-go.sh
             caddy-cloudflare
             tests/smoke.sh
           )
@@ -279,5 +305,6 @@ jobs:
             caddy-cloudflare.sh \
             install.sh \
             install-cloudflare.sh \
+            install-go.sh \
             caddy-cloudflare \
             tests/smoke.sh

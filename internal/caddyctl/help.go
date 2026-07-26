@@ -1,0 +1,41 @@
+package caddyctl
+
+import "fmt"
+
+func (a *App) help() {
+	fmt.Fprint(a.Out, `用法:
+  c <命令> [参数]
+
+站点:
+  c list
+  c add <域名> <端口> [--http|--https] [--path <前缀>] [--dns-only] [--skip-dns-check]
+  c add-static <域名> <目录> [--spa] [--http|--https] [--dns-only]
+  c add-emby <域名> <目标> [--http|--https] [--dns-only]
+  c add-gateway <域名> --allow <host:port,...> [--http|--https] [--dns-only]
+  c set <域名> [--port <端口>] [--path <前缀|off>] [--http|--https] [--dns-only]
+  c set-static <域名> [--root <目录>] [--spa|--no-spa] [--http|--https]
+  c set-emby <域名> [--target <地址>] [--http|--https] [--dns-only]
+  c set-gateway <域名> [--allow <列表>|--unsafe-open-proxy] [--http|--https]
+  c enable|disable|rm <域名>
+
+配置与恢复:
+  c config | validate | apply
+  c email [邮箱]
+  c timeout [秒|default]
+  c upstream-mode [warn|strict]
+  c import [--merge] [--force] [Caddyfile路径]
+  c snapshots [数量|all]
+  c undo [快照ID]
+
+服务与生命周期:
+  c start | restart | stop | status | logs
+  c cloudflare set|check|remove
+  c install | install-self | update | menu
+  c version
+
+说明:
+  · 日常配置命令由 Go 原生实现。
+  · install/menu 暂由 caddyctl-legacy 兼容入口处理；update 原生更新 Go release 二进制。
+  · 设置 CADDYCTL_ROOT 可在隔离目录测试，不会访问生产 /etc/caddy。
+`)
+}

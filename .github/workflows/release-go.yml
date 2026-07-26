@@ -1,0 +1,70 @@
+name: Release Go CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test ./...
+      - name: Build static binary
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          asset="caddyctl-linux-${GOARCH}"
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/buglyz/caddy_cli/internal/caddyctl.Version=${GITHUB_REF_NAME}" \
+            -o "$asset" ./cmd/caddyctl
+          sha256sum "$asset" > "${asset}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: caddyctl-linux-${{ matrix.goarch }}
+          path: |
+            caddyctl-linux-${{ matrix.goarch }}
+            caddyctl-linux-${{ matrix.goarch }}.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create checksums
+        run: |
+          set -euo pipefail
+          find dist -name '*.sha256' -type f -print0 \
+            | sort -z \
+            | xargs -0 cat > dist/caddyctl-checksums.txt
+      - name: Publish assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes
+          gh release upload "$tag" \
+            dist/caddyctl-linux-amd64 \
+            dist/caddyctl-linux-arm64 \
+            dist/caddyctl-checksums.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
