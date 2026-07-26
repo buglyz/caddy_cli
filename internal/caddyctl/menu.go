@@ -29,7 +29,7 @@ func (a *App) interactiveMenu() error {
 			m.run("list")
 			m.pause()
 		case "2":
-			m.run("status")
+			m.run("restart")
 			m.pause()
 		case "3":
 			m.run("logs")
@@ -39,12 +39,10 @@ func (a *App) interactiveMenu() error {
 		case "5":
 			m.embyMenu()
 		case "6":
-			m.serviceMenu()
-		case "7":
 			m.configMenu()
-		case "8":
+		case "7":
 			m.diagnosticsMenu()
-		case "9":
+		case "8":
 			m.installMenu()
 		case "0", "q", "quit", "exit":
 			return nil
@@ -60,20 +58,19 @@ func (m *menuSession) printMain() {
 	fmt.Fprint(m.app.Out, `
 ====== Caddy CLI 管理面板 ======
 
-【快捷操作】
-1. 查看所有站点
-2. 查看服务状态
+【快速操作】
+1. 查看所有站点状态
+2. 重启 Caddy 服务
 3. 查看实时日志
 
 【站点管理】
-4. 普通站点（反代 / 静态）
-5. Emby / 网关
+4. 站点管理
+5. Emby 专用管理
 
 【系统管理】
-6. 服务控制（启动 / 重启 / 停止）
-7. 配置 / 导入 / 全局设置
-8. 诊断 / 证书 / 备份回滚
-9. 安装与更新
+6. 服务与配置
+7. 诊断与维护
+8. 安装与更新
 
 0. 退出
 ============================
@@ -84,20 +81,20 @@ func (m *menuSession) sitesMenu() {
 	for {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
-====== 普通站点 · 反代 / 静态 ======
+====== 站点管理 ======
 【查看】
 1. 查看所有站点
 
-【添加】
+【添加站点】
 2. 添加反向代理
 3. 添加静态网站
 
-【管理】
-4. 修改站点
-5. 启用 / 禁用站点
+【管理站点】
+4. 修改站点配置
+5. 启用/禁用站点
 6. 删除站点
 0. 返回上一级
-===================================
+======================
 `)
 		choice, ok := m.read("选择: ")
 		if !ok || choice == "0" {
@@ -128,19 +125,19 @@ func (m *menuSession) embyMenu() {
 	for {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
-====== Emby / 通用网关 ======
+====== Emby 专用管理 ======
 【查看】
-1. 查看 Emby 与网关
+1. 查看 Emby 配置
 
 【添加】
-2. 添加 Emby 固定反代
-3. 添加通用反代网关
+2. 添加固定反代
+3. 添加通用网关
 
 【管理】
-4. 修改 Emby / 网关
-5. 删除 Emby / 网关
+4. 修改配置
+5. 删除配置
 0. 返回上一级
-============================
+======================
 `)
 		choice, ok := m.read("选择: ")
 		if !ok || choice == "0" {
@@ -159,36 +156,6 @@ func (m *menuSession) embyMenu() {
 		case "5":
 			m.removeSite("rm-emby")
 		default:
-			m.invalid()
-		}
-		m.pause()
-	}
-}
-
-func (m *menuSession) serviceMenu() {
-	for {
-		m.clearScreen()
-		fmt.Fprint(m.app.Out, `
-====== 服务控制 ======
-【服务操作】
-1. 启动 Caddy
-2. 重启 Caddy
-3. 停止 Caddy
-
-【查看】
-4. 查看服务状态
-5. 实时日志
-0. 返回上一级
-======================
-`)
-		choice, ok := m.read("选择: ")
-		if !ok || choice == "0" {
-			return
-		}
-		commands := map[string]string{"1": "start", "2": "restart", "3": "stop", "4": "status", "5": "logs"}
-		if command, exists := commands[choice]; exists {
-			m.run(command)
-		} else {
 			m.invalid()
 		}
 		m.pause()

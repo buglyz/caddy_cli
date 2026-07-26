@@ -43,10 +43,9 @@ func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 	input := strings.Join([]string{
 		"4", "4", "0", "0",
 		"5", "4", "0", "0",
-		"6", "0",
-		"7", "7", "0", "8", "0", "0",
+		"6", "7", "0", "12", "0", "0",
+		"7", "0",
 		"8", "0",
-		"9", "0",
 		"0",
 	}, "\n") + "\n"
 	app, out, _ := newTestApp(t, input)
@@ -56,15 +55,14 @@ func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 
 	for _, title := range []string{
 		"Caddy CLI 管理面板",
-		"普通站点 · 反代 / 静态",
+		"站点管理",
 		"修改普通站点",
-		"Emby / 通用网关",
+		"Emby 专用管理",
 		"修改 Emby / 网关",
-		"服务控制",
-		"配置 / 导入 / 全局设置",
-		"全局设置",
+		"服务与配置",
+		"配置设置",
 		"Cloudflare DNS 管理",
-		"诊断 / 证书 / 备份回滚",
+		"诊断与维护",
 		"安装与更新",
 	} {
 		wanted := clearScreenSequence + "\n====== " + title
@@ -73,9 +71,9 @@ func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 		}
 	}
 	for _, section := range []string{
-		"【查看】", "【添加】", "【管理】", "【服务操作】",
-		"【配置】", "【导入】", "【全局设置】", "【诊断】",
-		"【备份回滚】", "【安装】", "【更新】", "【状态】", "【凭据】",
+		"【查看】", "【添加站点】", "【管理站点】", "【添加】", "【管理】",
+		"【服务控制】", "【配置管理】", "【高级操作】", "【诊断工具】",
+		"【备份回滚】", "【状态】", "【凭据】",
 	} {
 		if !strings.Contains(out.String(), section) {
 			t.Errorf("layered menus missing section %q", section)
@@ -88,18 +86,17 @@ func TestMainMenuSectionsAndNumbering(t *testing.T) {
 	runOK(t, app)
 	menu := out.String()
 	items := []string{
-		"【快捷操作】",
-		"1. 查看所有站点",
-		"2. 查看服务状态",
+		"【快速操作】",
+		"1. 查看所有站点状态",
+		"2. 重启 Caddy 服务",
 		"3. 查看实时日志",
 		"【站点管理】",
-		"4. 普通站点（反代 / 静态）",
-		"5. Emby / 网关",
+		"4. 站点管理",
+		"5. Emby 专用管理",
 		"【系统管理】",
-		"6. 服务控制（启动 / 重启 / 停止）",
-		"7. 配置 / 导入 / 全局设置",
-		"8. 诊断 / 证书 / 备份回滚",
-		"9. 安装与更新",
+		"6. 服务与配置",
+		"7. 诊断与维护",
+		"8. 安装与更新",
 		"0. 退出",
 	}
 	previous := -1
@@ -126,10 +123,22 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
+	managerDir := t.TempDir()
+	recordPath := filepath.Join(managerDir, "service-action")
+	manager := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CADDYCTL_TEST_SERVICE_ACTION\"\n"
+	if err := os.WriteFile(filepath.Join(managerDir, "systemctl"), []byte(manager), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", managerDir)
+	t.Setenv("CADDYCTL_TEST_SERVICE_ACTION", recordPath)
+	isolatedRoot := app.Paths.Root
+	app.Paths.Root = ""
 	app.In = strings.NewReader("2\n\n0\n")
 	runOK(t, app)
-	if !strings.Contains(errOut.String(), "隔离模式不执行 Caddy 服务操作") {
-		t.Fatalf("quick service status did not run: %s", errOut.String())
+	app.Paths.Root = isolatedRoot
+	action, err := os.ReadFile(recordPath)
+	if err != nil || strings.TrimSpace(string(action)) != "restart caddy" {
+		t.Fatalf("quick restart action=%q err=%v stderr=%s", action, err, errOut.String())
 	}
 
 	logPath := filepath.Join(app.Paths.Root, "var/log/caddy/caddy.log")

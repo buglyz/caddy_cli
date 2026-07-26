@@ -9,48 +9,60 @@ func (m *menuSession) configMenu() {
 	for {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
-====== 配置 / 导入 / 全局设置 ======
-【配置】
-1. 查看当前 Caddyfile
-2. 校验配置
-3. 应用配置（reload）
-4. 校验并应用
+====== 服务与配置 ======
 
-【导入】
-5. 替换导入（清空 sites.d）
-6. 合并导入（--merge）
+【服务控制】
+1. 启动 Caddy
+2. 重启 Caddy
+3. 停止 Caddy
+4. 查看服务状态
 
-【全局设置】
-7. 邮箱 / 超时 / 上游检查
+【配置管理】
+5. 查看当前配置
+6. 校验并应用配置
+7. 配置设置（邮箱/超时/上游）
+
+【高级操作】
+8. 导入现有配置
+9. 合并导入配置
+10. 仅校验配置
+11. 仅应用配置（reload）
 `)
 		if m.app.Cloudflare {
-			fmt.Fprintln(m.app.Out, "\n【DNS】")
-			fmt.Fprintln(m.app.Out, "8. Cloudflare DNS 管理")
+			fmt.Fprintln(m.app.Out, "12. Cloudflare DNS 管理")
 		}
-		fmt.Fprint(m.app.Out, "0. 返回上一级\n===================================\n")
+		fmt.Fprint(m.app.Out, "0. 返回上一级\n======================\n")
 		choice, ok := m.read("选择: ")
 		if !ok || choice == "0" {
 			return
 		}
 		switch choice {
 		case "1":
-			m.run("config")
+			m.run("start")
 		case "2":
-			m.run("validate")
+			m.run("restart")
 		case "3":
-			m.run("apply")
+			m.run("stop")
 		case "4":
+			m.run("status")
+		case "5":
+			m.run("config")
+		case "6":
 			if m.run("validate") {
 				m.run("apply")
 			}
-		case "5":
-			m.importConfig(false)
-		case "6":
-			m.importConfig(true)
 		case "7":
 			m.settingsMenu()
 			continue
 		case "8":
+			m.importConfig(false)
+		case "9":
+			m.importConfig(true)
+		case "10":
+			m.run("validate")
+		case "11":
+			m.run("apply")
+		case "12":
 			if m.app.Cloudflare {
 				m.cloudflareMenu()
 				continue
@@ -67,7 +79,7 @@ func (m *menuSession) settingsMenu() {
 	for {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
-====== 全局设置 ======
+====== 配置设置 ======
 1. 设置 ACME 邮箱
 2. 设置服务超时
 3. 设置上游检查模式
@@ -127,17 +139,18 @@ func (m *menuSession) diagnosticsMenu() {
 	for {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
-====== 诊断 / 证书 / 备份回滚 ======
-【诊断】
+====== 诊断与维护 ======
+
+【诊断工具】
 1. 环境检查（doctor）
-2. 实时日志
+2. 查看 Caddy 日志
 3. 证书诊断
 
 【备份回滚】
 4. 查看回滚快照
-5. 回滚（上一步 / 指定快照）
+5. 回滚到上一步
 0. 返回上一级
-===================================
+======================
 `)
 		choice, ok := m.read("选择: ")
 		if !ok || choice == "0" {
@@ -190,11 +203,8 @@ func (m *menuSession) installMenu() {
 		m.clearScreen()
 		fmt.Fprint(m.app.Out, `
 ====== 安装与更新 ======
-【安装】
-1. 安装 / 初始化 Caddy
+1. 安装/初始化 Caddy
 2. 安装本机 CLI（install-self）
-
-【更新】
 3. 更新 CLI 到滚动版 go-latest
 4. 更新到指定固定版本
 5. 更新 CLI 与 Caddy 二进制
