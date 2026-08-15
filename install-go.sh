@@ -58,6 +58,13 @@ Environment:
   CADDYCTL_GO_REPOSITORY        GitHub owner/repository
   CADDYCTL_GO_RELEASE_BASE_URL  Override release asset base URL (testing)
   CADDYCTL_GO_BIN_DIR           Install directory (default /usr/local/bin)
+  CADDYCTL_GO_CF_MARKER         Cloudflare marker file path
+  CADDYCTL_GO_CONFIG_DIR        Managed config directory (default /etc/caddy)
+  CADDYCTL_GO_PENDING_IMPORT_MARKER  Pending import marker path
+  CADDYCTL_GO_LOG_DIR           Log directory (default /var/log/caddy)
+  CADDYCTL_GO_SYSTEMD_DROPIN_DIR  systemd drop-in directory
+  CADDYCTL_GO_OPENRC_CONF       OpenRC env file (default /etc/conf.d/caddy)
+  CADDYCTL_GO_CLOUDFLARE_MODULE Cloudflare DNS module (default github.com/caddy-dns/cloudflare)
 EOF
 }
 
@@ -68,7 +75,7 @@ download() {
         curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 --max-time 120 \
             "$url" -o "$output"
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -T 120 -O "$output" "$url"
+        wget -q -T 120 --tries 3 --timeout 15 -O "$output" "$url"
     else
         die "curl or wget is required"
     fi
@@ -108,8 +115,12 @@ verify_asset() {
     local sums="$2"
     local name="$3"
     local expected actual
-    expected="$(awk -v name="$name" '$2 == name { print $1; exit }' "$sums")"
-    [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || die "checksum entry missing or invalid: $name"
+    # 兼容 `hash  name` 与 `hash *name`(sha256sum 文本/二进制模式),
+    # 与 Go 端 caddyctl 的 checksumEntry 解析保持一致。
+    expected="$(awk -v name="$name" \
+        '$2 == name || $2 == "*"name { print $1; exit }' "$sums" | \
+        tr 'A-F' 'a-f')"
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || die "checksum entry missing or invalid: $name"
     actual="$(sha256sum "$binary" | awk '{ print $1 }')"
     [[ "$actual" == "$expected" ]] || die "checksum mismatch: $name"
 }
@@ -176,6 +187,18 @@ backup_existing_config() {
         fi
     done
     log "Existing Caddy configuration backed up to $backup_dir"
+    prune_old_backups
+}
+
+# 只保留最近 10 份 pre-install-* 备份,避免目录无限增长。
+prune_old_backups() {
+    local count
+    count="$(find "$CONFIG_DIR/backup" -maxdepth 1 -type d -name 'pre-install-*' | wc -l)"
+    if (( count > 10 )); then
+        find "$CONFIG_DIR/backup" -maxdepth 1 -type d -name 'pre-install-*' \
+            | sort -r | tail -n +11 | xargs -r rm -rf --
+        log "Pruned old pre-install backups, keeping the most recent 10."
+    fi
 }
 
 install_caddy_debian() {
