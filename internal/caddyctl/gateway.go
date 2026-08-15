@@ -24,7 +24,7 @@ func renderGateway(opts SiteOptions, tls string) (string, error) {
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Emby 通用反代网关\n# 访问格式: %s://%s/https://<上游主机:端口>/路径\n# 上游限制: %s\n\n%s://%s {\n%s", scheme, label, access, scheme, label, tls)
-	out.WriteString("    encode zstd gzip\n    request_body {\n        max_size 500MB\n    }\n\n")
+	out.WriteString("    request_body {\n        max_size 500MB\n    }\n\n")
 	info := fmt.Sprintf("OK\n\n通用反代网关 — Emby Proxy Toolbox (Caddy)\n\n使用方式：\n  %s://%s/http://<上游主机:端口>/路径\n  %s://%s/https://<上游主机:端口>/路径\n\n上游限制: %s\n回源协议由路径中的 http:// 或 https:// 决定。", scheme, label, scheme, label, access)
 	fmt.Fprintf(&out, "    handle / {\n        respond %q 200\n    }\n\n", info)
 	if len(opts.Allow) == 0 {
@@ -65,7 +65,14 @@ func emitGatewayRoute(out *strings.Builder, matcher, name, pattern, rest, upstre
 	fmt.Fprintf(out, "    @%s path_regexp %s %s\n    handle @%s {\n        rewrite * %s\n        reverse_proxy {\n            to %s\n", matcher, name, pattern, matcher, rest, upstream)
 	// keepalive 连接池：复用上游 TCP 连接，减少握手开销
 	if upstreamScheme == "https" {
-		out.WriteString("            transport http {\n                tls\n                keepalive 30s\n                keepalive_idle_conns 100\n                keepalive_idle_conns_per_host 10\n            }\n")
+		transport := "            transport http {\n                tls\n"
+		// 对内网 IP 地址的 HTTPS 上游，跳过 TLS 证书验证（自签证书场景）
+		host, _, _ := net.SplitHostPort(upstream)
+		if net.ParseIP(host) != nil {
+			transport += "                tls_insecure_skip_verify\n"
+		}
+		transport += "                keepalive 30s\n                keepalive_idle_conns 100\n                keepalive_idle_conns_per_host 10\n            }\n"
+		out.WriteString(transport)
 	} else {
 		out.WriteString("            transport http {\n                keepalive 30s\n                keepalive_idle_conns 100\n                keepalive_idle_conns_per_host 10\n            }\n")
 	}

@@ -16,11 +16,14 @@ import (
 
 func (a *App) assertManaged() error {
 	live, err := os.ReadFile(a.Paths.Caddyfile)
-	if errors.Is(err, os.ErrNotExist) || len(bytes.TrimSpace(live)) == 0 {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if len(bytes.TrimSpace(live)) == 0 {
+		return nil
 	}
 	rendered, err := a.renderManaged()
 	if err != nil {

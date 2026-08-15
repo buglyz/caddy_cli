@@ -160,8 +160,10 @@ func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {
 	for _, block := range blocks {
 		if strings.HasPrefix(strings.TrimSpace(block.Header), "{") {
 			body := strings.Split(block.Text, "\n")
-			if len(body) >= 2 {
+			if len(body) > 2 {
 				body = body[1 : len(body)-2]
+			} else {
+				body = nil
 			}
 			for _, line := range body {
 				trimmed := strings.TrimSpace(line)
@@ -175,6 +177,9 @@ func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {
 		}
 		name := slugHeader(block.Header)
 		path := uniqueImportPath(sitesStage, name, block.Text)
+		if path == "" {
+			return fmt.Errorf("导入站点去重冲突: 同名文件超过上限 (%s)", name)
+		}
 		if err := os.WriteFile(path, []byte(block.Text), 0o644); err != nil {
 			return err
 		}
@@ -273,7 +278,7 @@ func slugHeader(header string) string {
 }
 
 func uniqueImportPath(dir, name, content string) string {
-	for i := 0; ; i++ {
+	for i := 0; i <= 1000; i++ {
 		base := name
 		if i > 0 {
 			base = fmt.Sprintf("%s-%d", name, i)
@@ -284,4 +289,5 @@ func uniqueImportPath(dir, name, content string) string {
 			return path
 		}
 	}
+	return ""
 }

@@ -108,9 +108,16 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 	case SiteEmby:
 		// Emby 流媒体反代：flush_interval -1 关闭缓冲保证流式传输；
 		// keepalive 连接池复用上游 TCP，减少握手开销。
-		transport := "        transport http {\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+		var transport string
 		if strings.HasPrefix(opts.Target, "https://") {
-			transport = "        transport http {\n            tls\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+			tlsLine := "            tls\n"
+			// 对内网 IP 地址的 HTTPS 上游，跳过 TLS 证书验证（自签证书场景）
+			if isIPHost(opts.Target) {
+				tlsLine = "            tls\n            tls_insecure_skip_verify\n"
+			}
+			transport = "        transport http {\n" + tlsLine + "            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+		} else {
+			transport = "        transport http {\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
 		}
 		return fmt.Sprintf("%s {\n%s    reverse_proxy %s {\n        header_up Host {upstream_hostport}\n%s        flush_interval -1\n    }\n}\n", label, tls, opts.Target, transport), nil
 	case SiteGateway:

@@ -67,8 +67,23 @@ func validPathPrefix(value string) bool {
 	return strings.HasPrefix(value, "/") && value != "/" && !strings.ContainsAny(value, " \t\r\n{}\"';#\\")
 }
 
+// 敏感目录黑名单，防止静态站点 root 意外暴露系统文件
+var sensitiveRootPrefixes = []string{
+	"/", "/etc", "/proc", "/sys", "/dev", "/boot", "/root", "/var/log",
+}
+
 func validStaticRoot(value string) bool {
-	return strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n")
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\r\n") {
+		return false
+	}
+	clean := strings.TrimSuffix(value, "/")
+	for _, prefix := range sensitiveRootPrefixes {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizePathPrefix(value string) string {
@@ -88,6 +103,37 @@ func validProxyTarget(target string) bool {
 	u, err := url.Parse(target)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" &&
 		u.Path == "" && u.RawPath == "" && u.RawQuery == "" && u.Fragment == ""
+}
+
+// isPrivateHost 检测目标 host 是否为内网/保留地址（RFC1918/链路本地/环回/元数据端点）
+func isPrivateHost(host string) bool {
+	hostname := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		hostname = h
+	}
+	ip := net.ParseIP(hostname)
+	if ip == nil {
+		// 域名场景：localhost 或 .local
+		return hostname == "localhost" || strings.HasSuffix(hostname, ".local")
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		return true
+	}
+	// 云元数据端点 169.254.169.254
+	if ip.Equal(net.ParseIP("169.254.169.254")) {
+		return true
+	}
+	return false
+}
+
+// isIPHost 判断 URL 的 host 部分是否为 IP 地址（用于决定是否跳过 TLS 验证）
+func isIPHost(target string) bool {
+	u, err := url.Parse(target)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return net.ParseIP(host) != nil
 }
 
 func parseGatewayAllow(spec string) ([]string, error) {

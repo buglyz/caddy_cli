@@ -2,6 +2,7 @@ package caddyctl
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -146,6 +147,10 @@ func (a *App) addEmby(args []string) error {
 	}
 	if !validProxyTarget(target) {
 		return fmt.Errorf("目标地址不合法")
+	}
+	u, _ := url.Parse(target)
+	if u != nil && isPrivateHost(u.Host) {
+		fmt.Fprintf(a.Err, "警告: 目标 %s 是内网/保留地址，请确保配置可信\n", target)
 	}
 	if !flags.skipDNS {
 		if err := a.checkDNS(label); err != nil {

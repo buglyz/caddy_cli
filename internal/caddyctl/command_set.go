@@ -155,7 +155,7 @@ func validateSetFlags(flags setFlags, kind SiteKind) error {
 	return nil
 }
 
-var templateDirectiveRE = regexp.MustCompile(`^(?:encode\b|reverse_proxy\b|uri\s+strip_prefix\b|tls\b|file_server\b|try_files\b|root\s+\*|request_body\b|route\b|respond\b|@path_|handle\b|rewrite\b|transport\b|header_up\s+(?:Host|X-Real-IP)\b|header_down\b|flush_interval\b|to\b|#)`)
+var templateDirectiveRE = regexp.MustCompile(`^(?:encode\b|reverse_proxy\b|uri\s+strip_prefix\b|tls\b|file_server\b|try_files\b|root\s+\*|request_body\b|route\b|respond\b|@path_|handle\b|rewrite\b|transport\b|header_up\s+(?:Host|X-Real-IP)\b|header_down\b|flush_interval\b|to\b)`)
 
 func extractCustomDirectives(data string) string {
 	// 使用 caddyLexer 正确解析引号/注释,避免缩进启发式。
