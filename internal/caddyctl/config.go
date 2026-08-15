@@ -67,7 +67,10 @@ func readEnvFile(path string) []string {
 			continue
 		}
 		key, value, _ := strings.Cut(line, "=")
-		value = strings.Trim(strings.TrimSpace(value), "\"'")
+		// 与 escapeEnv 对称解析,避免把转义后的值原样注入环境。
+		if unescaped, parseErr := unescapeEnv(value); parseErr == nil {
+			value = unescaped
+		}
 		result = append(result, strings.TrimSpace(key)+"="+value)
 	}
 	return result

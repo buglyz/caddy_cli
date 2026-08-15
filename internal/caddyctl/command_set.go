@@ -158,55 +158,58 @@ func validateSetFlags(flags setFlags, kind SiteKind) error {
 var templateDirectiveRE = regexp.MustCompile(`^(?:encode\b|reverse_proxy\b|uri\s+strip_prefix\b|tls\b|file_server\b|try_files\b|root\s+\*|request_body\b|route\b|respond\b|@path_|handle\b|rewrite\b|transport\b|header_up\s+(?:Host|X-Real-IP)\b|header_down\b|flush_interval\b|to\b|#)`)
 
 func extractCustomDirectives(data string) string {
+	// 使用 caddyLexer 正确解析引号/注释,避免缩进启发式。
+	// 只提取站点块(depth=1)中非模板指令的行及其嵌套块。
 	lines := strings.Split(data, "\n")
 	if len(lines) < 3 {
 		return ""
 	}
+	var lexer caddyLexer
 	depth := 0
 	var out []string
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-		if i == 0 || trimmed == "" {
-			depth += strings.Count(line, "{") - strings.Count(line, "}")
-			continue
-		}
+		clean := lexer.code(line)
+		trimmed := strings.TrimSpace(clean)
+		delta := strings.Count(clean, "{") - strings.Count(clean, "}")
 		before := depth
-		delta := strings.Count(line, "{") - strings.Count(line, "}")
 		depth += delta
-		if before != 1 || trimmed == "}" || templateDirectiveRE.MatchString(trimmed) {
+		if trimmed == "" || trimmed == "}" || before == 0 {
 			continue
 		}
-		out = append(out, line)
-		if delta > 0 {
-			blockDepth := delta
-			for blockDepth > 0 && i+1 < len(lines) {
+		if before == 1 && !templateDirectiveRE.MatchString(trimmed) {
+			// 非模板指令:收集该行及其后续嵌套块,直到站点块外。
+			out = append(out, line)
+			for depth > 1 && i+1 < len(lines) {
 				i++
 				nested := lines[i]
 				out = append(out, nested)
-				nestedDelta := strings.Count(nested, "{") - strings.Count(nested, "}")
-				blockDepth += nestedDelta
-				depth += nestedDelta
+				nestedClean := lexer.code(nested)
+				depth += strings.Count(nestedClean, "{") - strings.Count(nestedClean, "}")
 			}
+			continue
 		}
 	}
 	return strings.Join(out, "\n")
 }
-
 func whitelistCustomDirectives(extras string) string {
+	// 同样使用 caddyLexer 追踪引号,避免块内引号含 { } 时深度计数错乱。
+	var lexer caddyLexer
 	var out []string
 	lines := strings.Split(extras, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
-		trimmed := strings.TrimSpace(line)
+		clean := lexer.code(line)
+		trimmed := strings.TrimSpace(clean)
 		if strings.HasPrefix(trimmed, "header ") || strings.HasPrefix(trimmed, "basic_auth ") ||
 			strings.HasPrefix(trimmed, "basicauth ") || strings.HasPrefix(trimmed, "log ") {
 			out = append(out, line)
-			depth := strings.Count(line, "{") - strings.Count(line, "}")
+			depth := strings.Count(clean, "{") - strings.Count(clean, "}")
 			for depth > 0 && i+1 < len(lines) {
 				i++
-				out = append(out, lines[i])
-				depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+				nested := lines[i]
+				out = append(out, nested)
+				depth += strings.Count(lexer.code(nested), "{") - strings.Count(lexer.code(nested), "}")
 			}
 		}
 	}

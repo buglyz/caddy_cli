@@ -34,6 +34,8 @@ func (a *App) logs() error {
 			cmd.Stdout, cmd.Stderr = a.Out, a.Err
 			if err := cmd.Run(); err == nil {
 				return nil
+			} else {
+				fmt.Fprintf(a.Err, "警告: journalctl 查询失败,回退到日志文件: %v\n", err)
 			}
 		}
 	}

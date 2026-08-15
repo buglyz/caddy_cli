@@ -103,3 +103,119 @@ func TestSiteSchemeUsesHeaderAfterComments(t *testing.T) {
 		t.Fatalf("siteScheme=%q, want http", got)
 	}
 }
+
+func TestCustomDirectivesExtractionWithoutIndentation(t *testing.T) {
+	// 无缩进的 Caddyfile:提取不应依赖缩进层级。
+	source := `app.example.com {
+encode zstd gzip
+header {
+X-Test yes
+}
+reverse_proxy 127.0.0.1:3000
+}`
+	extras := extractCustomDirectives(source)
+	if !strings.Contains(extras, "X-Test yes") {
+		t.Fatalf("no-indent block body lost: %s", extras)
+	}
+	if strings.Contains(extras, "reverse_proxy") || strings.Contains(extras, "encode") {
+		t.Fatalf("template directives leaked into extras: %s", extras)
+	}
+}
+
+func TestCustomDirectivesSkipsQuotedBraces(t *testing.T) {
+	source := "app.example.com {\n    respond \"literal { brace\" 200\n    header {\n        X-Test yes\n    }\n}\n"
+	extras := extractCustomDirectives(source)
+	if strings.Contains(extras, "respond") {
+		t.Fatalf("respond should be template, got extras: %s", extras)
+	}
+	if !strings.Contains(extras, "X-Test yes") {
+		t.Fatalf("header block body lost: %s", extras)
+	}
+}
+
+func TestCustomDirectivesPreservesOnlySiteLevel(t *testing.T) {
+	source := `app.example.com {
+    encode zstd gzip
+    handle /api {
+        reverse_proxy 127.0.0.1:3000
+    }
+    header {
+        X-Test yes
+    }
+}`
+	extras := extractCustomDirectives(source)
+	if !strings.Contains(extras, "X-Test yes") {
+		t.Fatalf("header body lost: %s", extras)
+	}
+	if strings.Contains(extras, "reverse_proxy") || strings.Contains(extras, "handle /api") {
+		t.Fatalf("nested template directives should not be extracted: %s", extras)
+	}
+}
+
+func TestCustomDirectivesMultipleBlocksAndTemplates(t *testing.T) {
+	// 多个自定义块 + 模板指令交错,验证深度追踪不串块。
+	source := `app.example.com {
+    encode zstd gzip
+    header {
+        X-One yes
+    }
+    reverse_proxy 127.0.0.1:3000
+    log {
+        output file /var/log/app.log
+    }
+    basic_auth {
+        user hash
+    }
+}`
+	extras := extractCustomDirectives(source)
+	for _, want := range []string{"X-One yes", "output file /var/log/app.log", "user hash"} {
+		if !strings.Contains(extras, want) {
+			t.Fatalf("missing %q in extras:\n%s", want, extras)
+		}
+	}
+	for _, bad := range []string{"encode zstd", "reverse_proxy"} {
+		if strings.Contains(extras, bad) {
+			t.Fatalf("template directive leaked: %q\n%s", bad, extras)
+		}
+	}
+}
+
+func TestCustomDirectivesOneLineAndSameLineBrace(t *testing.T) {
+	// header 与 { 同行、块内仅一行,以及无嵌套单行指令。
+	cases := []struct{ source, want string }{
+		{"app.example.com {\n    header X-Test yes\n}\n", "header X-Test yes"},
+		{"app.example.com {\n    header { X-Test yes }\n}\n", "X-Test yes"},
+		{"app.example.com {\n    basic_auth user hash\n}\n", "basic_auth user hash"},
+	}
+	for _, tc := range cases {
+		if got := extractCustomDirectives(tc.source); !strings.Contains(got, tc.want) {
+			t.Errorf("source %q: missing %q in extras: %q", tc.source, tc.want, got)
+		}
+	}
+}
+
+func TestWhitelistWorksWithNewExtraction(t *testing.T) {
+	// Emby/Gateway 场景:extract 后经 whitelist 过滤,只保留 header/basic_auth/log。
+	source := `emby.example.com {
+    reverse_proxy https://10.0.0.5:8096 {
+        header_up Host {upstream_hostport}
+    }
+    header {
+        X-Frame-Options DENY
+    }
+    log {
+        output file /var/log/emby.log
+    }
+    respond "unused" 403
+}`
+	extras := extractCustomDirectives(source)
+	filtered := whitelistCustomDirectives(extras)
+	for _, want := range []string{"X-Frame-Options DENY", "output file /var/log/emby.log"} {
+		if !strings.Contains(filtered, want) {
+			t.Fatalf("whitelist lost %q:\n%s", want, filtered)
+		}
+	}
+	if strings.Contains(filtered, "unused") || strings.Contains(filtered, "reverse_proxy") {
+		t.Fatalf("whitelist kept non-whitelisted directive:\n%s", filtered)
+	}
+}

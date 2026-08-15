@@ -89,7 +89,7 @@ func TestMainMenuSectionsAndNumbering(t *testing.T) {
 		"【快速操作】",
 		"1. 查看所有站点状态",
 		"2. 重启 Caddy 服务",
-		"3. 查看实时日志",
+		"3. 查看最近日志",
 		"【站点管理】",
 		"4. 站点管理",
 		"5. Emby 专用管理",

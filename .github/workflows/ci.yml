@@ -54,6 +54,20 @@ jobs:
           /tmp/caddyctl-amd64 validate
           caddy validate --config "$root/etc/caddy/Caddyfile" --adapter caddyfile
 
+          # 合并导入:新增站点应出现在 live Caddyfile
+          printf 'merged.example.com {\n    reverse_proxy 127.0.0.1:4000\n}\n' > "$root/merged.Caddyfile"
+          /tmp/caddyctl-amd64 import --merge "$root/merged.Caddyfile"
+          /tmp/caddyctl-amd64 validate
+          grep -q 'merged.example.com' "$root/etc/caddy/Caddyfile"
+          caddy validate --config "$root/etc/caddy/Caddyfile" --adapter caddyfile
+
+          # 删除静态站后 undo,应恢复站点文件
+          /tmp/caddyctl-amd64 rm static.example.com
+          test ! -e "$root/etc/caddy/sites.d/static.example.com.conf"
+          /tmp/caddyctl-amd64 undo
+          test -e "$root/etc/caddy/sites.d/static.example.com.conf"
+          /tmp/caddyctl-amd64 validate
+
       - name: Installer integration
         run: |
           set -euo pipefail

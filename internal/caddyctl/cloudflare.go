@@ -113,7 +113,9 @@ func readTokenInput(reader io.Reader) (string, error) {
 		return "", fmt.Errorf("未读取到 Cloudflare Token")
 	}
 	token := strings.TrimSpace(scanner.Text())
-	if token == "" || strings.ContainsAny(token, "\r\n \t") {
+	// Cloudflare API Token 仅含字母数字与 - _ ;禁止空格、引号和反斜杠,
+	// 从而保证 cloudflare.env 的写入/读取无需复杂 shell 转义即可一致。
+	if token == "" || strings.ContainsAny(token, "\r\n \t\"'\\") {
 		return "", fmt.Errorf("Cloudflare Token 格式不合法")
 	}
 	return token, nil
@@ -126,7 +128,19 @@ func verifyCloudflareToken(token string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	client := http.Client{Timeout: 10 * time.Second}
+	// 拒绝跨主机或降级到非 HTTPS 的重定向,防止 Token 泄漏到不可信目标。
+	client := http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			if len(via) > 0 && (next.URL.Host != via[0].URL.Host || next.URL.Scheme != "https") {
+				return fmt.Errorf("拒绝重定向到不可信目标: %s", next.URL.String())
+			}
+			if len(via) >= 5 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("验证 Cloudflare Token: %w", err)
@@ -151,10 +165,50 @@ func readCloudflareToken(path string) (string, error) {
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		text := strings.TrimSpace(string(line))
 		if strings.HasPrefix(text, "CLOUDFLARE_API_TOKEN=") {
-			return strings.Trim(strings.TrimPrefix(text, "CLOUDFLARE_API_TOKEN="), "\"'"), nil
+			raw := strings.TrimPrefix(text, "CLOUDFLARE_API_TOKEN=")
+			// 与 escapeEnv 对称:解析 " 与 \\ 转义,保证往返一致。
+			value, parseErr := unescapeEnv(raw)
+			if parseErr != nil {
+				return "", parseErr
+			}
+			return value, nil
 		}
 	}
 	return "", fmt.Errorf("Token 字段不存在")
+}
+
+// unescapeEnv 解析 escapeEnv 写入的转义序列,并剥掉首尾引号。
+func unescapeEnv(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		raw = raw[1 : len(raw)-1]
+	}
+	var out strings.Builder
+	escaped := false
+	for _, char := range raw {
+		if escaped {
+			switch char {
+			case '\\', '"':
+				out.WriteRune(char)
+			default:
+				return "", fmt.Errorf("cloudflare.env 转义序列不合法: \\%c", char)
+			}
+			escaped = false
+			continue
+		}
+		if char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			return "", fmt.Errorf("cloudflare.env 引号未转义")
+		}
+		out.WriteRune(char)
+	}
+	if escaped {
+		return "", fmt.Errorf("cloudflare.env 转义序列不完整")
+	}
+	return out.String(), nil
 }
 
 func escapeEnv(value string) string {

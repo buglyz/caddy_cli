@@ -111,9 +111,11 @@ func TestSetPreservesCustomBlocks(t *testing.T) {
 
 func TestFailedImportRestoresManagedDirectories(t *testing.T) {
 	app, _, _ := newTestApp(t, "")
+	runOK(t, app, "email", "old@example.com")
 	runOK(t, app, "add", "keep.example.com", "3000", "--skip-dns-check")
 	source := filepath.Join(app.Paths.Root, "bad.Caddyfile")
-	if err := os.WriteFile(source, []byte("bad.example.com {\n    INVALID\n}\n"), 0o600); err != nil {
+	// 含合法 email 和非法站点指令:若回滚不彻底,email 会被改成 new@example.com。
+	if err := os.WriteFile(source, []byte("{\n    email new@example.com\n}\nbad.example.com {\n    INVALID\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Run([]string{"import", "--force", source}); err == nil {
@@ -122,6 +124,14 @@ func TestFailedImportRestoresManagedDirectories(t *testing.T) {
 	keep := filepath.Join(app.Paths.Sites, "keep.example.com.conf")
 	if _, err := os.Stat(keep); err != nil {
 		t.Fatalf("failed import did not restore original site: %v", err)
+	}
+	// 状态文件中的 email 必须仍是导入前的值。
+	stateData, err := os.ReadFile(app.Paths.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stateData), "old@example.com") {
+		t.Fatalf("failed import did not restore state email:\n%s", stateData)
 	}
 }
 
