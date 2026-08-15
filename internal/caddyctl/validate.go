@@ -78,6 +78,9 @@ func validStaticRoot(value string) bool {
 		return false
 	}
 	clean := strings.TrimSuffix(value, "/")
+	if clean == "" {
+		return false
+	}
 	for _, prefix := range sensitiveRootPrefixes {
 		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return false
