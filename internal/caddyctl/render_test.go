@@ -52,7 +52,7 @@ func TestRenderGatewayAllowList(t *testing.T) {
 		`respond "OK\n\n通用反代网关`,
 		"header_up X-Real-IP {remote_host}",
 		"header_up Host emby.example.com",
-		"header_down Location ^https://([^/]+)(/.*)$ https://gate.example.com/https://$1$2",
+		"header_down Location ^(https?)://([^/]+)(/.*)$ https://gate.example.com/$1://$2$3",
 		"path_regexp up_https_default_port_0 ^/https:/*emby\\.example\\.com(/.*)",
 		"respond \"upstream is not allowed\" 403",
 	} {

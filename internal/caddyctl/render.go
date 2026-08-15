@@ -106,7 +106,13 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 		}
 		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    root * %s\n%s    file_server\n}\n", label, tls, quoteCaddy(opts.Root), spa), nil
 	case SiteEmby:
-		return fmt.Sprintf("%s {\n%s    reverse_proxy %s {\n        header_up Host {upstream_hostport}\n    }\n}\n", label, tls, opts.Target), nil
+		// Emby 流媒体反代：flush_interval -1 关闭缓冲保证流式传输；
+		// keepalive 连接池复用上游 TCP，减少握手开销。
+		transport := "        transport http {\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+		if strings.HasPrefix(opts.Target, "https://") {
+			transport = "        transport http {\n            tls\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+		}
+		return fmt.Sprintf("%s {\n%s    reverse_proxy %s {\n        header_up Host {upstream_hostport}\n%s        flush_interval -1\n    }\n}\n", label, tls, opts.Target, transport), nil
 	case SiteGateway:
 		return renderGateway(opts, tls)
 	default:
