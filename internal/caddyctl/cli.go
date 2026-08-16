@@ -186,7 +186,7 @@ func (a *App) Run(args []string) error {
 	case "apply", "reload":
 		return a.mutate("apply", a.apply)
 	case "config", "cat":
-		data, err := os.ReadFile(a.Paths.Caddyfile)
+		data, err := a.renderManaged()
 		if err != nil {
 			return err
 		}
