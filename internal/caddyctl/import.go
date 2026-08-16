@@ -176,7 +176,7 @@ func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {
 			continue
 		}
 		name := slugHeader(block.Header)
-		path := uniqueImportPath(sitesStage, name, block.Text)
+		path := uniqueImportPath(sitesStage, name, block.Text, merge)
 		if path == "" {
 			return fmt.Errorf("导入站点去重冲突: 同名文件超过上限 (%s)", name)
 		}
@@ -277,14 +277,21 @@ func slugHeader(header string) string {
 	return header
 }
 
-func uniqueImportPath(dir, name, content string) string {
-	for i := 0; i <= 1000; i++ {
-		base := name
-		if i > 0 {
-			base = fmt.Sprintf("%s-%d", name, i)
-		}
-		path := filepath.Join(dir, base+".conf")
-		data, err := os.ReadFile(path)
+func uniqueImportPath(dir, name, content string, overwrite bool) string {
+	// merge 模式下同名站点直接覆盖（以导入源为准），避免创建 name-1.conf
+	// 导致 caddy validate 报 ambiguous site definition。
+	path := filepath.Join(dir, name+".conf")
+	data, err := os.ReadFile(path)
+	if overwrite && err == nil {
+		return path
+	}
+	if errors.Is(err, os.ErrNotExist) || (err == nil && strings.TrimSpace(string(data)) == strings.TrimSpace(content)) {
+		return path
+	}
+	// 非 merge 模式或内容不同的同名文件，用后缀去重
+	for i := 1; i <= 1000; i++ {
+		path = filepath.Join(dir, fmt.Sprintf("%s-%d.conf", name, i))
+		data, err = os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) || (err == nil && strings.TrimSpace(string(data)) == strings.TrimSpace(content)) {
 			return path
 		}

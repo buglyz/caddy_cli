@@ -172,3 +172,26 @@ func detectSite(data string) SiteKind {
 		return SiteUnknown
 	}
 }
+
+// normalizeCaddyfile 规范化 Caddyfile 内容用于一致性比较。
+// 统一换行为 \n，去除每行尾部空白与首尾空白，折叠连续空行为单个空行。
+// 这样 assertManaged 不会因为无关的空白/换行差异（如 caddy fmt、手动编辑）
+// 误判为"不一致"，但仍能捕获真实的配置内容差异。
+func normalizeCaddyfile(data []byte) []byte {
+	// 统一换行
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, line := range lines {
+		// 去除每行尾部空白（含尾部注释外的多余空格）
+		out = append(out, strings.TrimRight(line, " \t"))
+	}
+	// 折叠连续空行为单个空行，并去除首尾空白
+	joined := strings.Join(out, "\n")
+	// 折叠 3+ 换行为 2 换行（即最多一个空行）
+	for strings.Contains(joined, "\n\n\n") {
+		joined = strings.ReplaceAll(joined, "\n\n\n", "\n\n")
+	}
+	return []byte(strings.TrimSpace(joined))
+}

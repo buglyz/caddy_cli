@@ -29,7 +29,7 @@ func (a *App) assertManaged() error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(live, rendered) {
+	if !bytes.Equal(normalizeCaddyfile(live), normalizeCaddyfile(rendered)) {
 		return fmt.Errorf("live Caddyfile 与 sites.d/globals.d 的 managed 渲染不一致，已拒绝覆盖；请先执行 c import --merge %s", a.Paths.Caddyfile)
 	}
 	return nil
