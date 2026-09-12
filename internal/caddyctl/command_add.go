@@ -67,30 +67,33 @@ type preAddResult struct {
 	label string
 }
 
-func (a *App) preAdd(args []string, command string, arity int, validLabel func(string) bool) (preAddResult, error) {
+func (a *App) preAdd(args []string, command string, arity int, usage string, validLabel func(string) bool) (preAddResult, error) {
 	var res preAddResult
 	flags, err := parseAddFlags(args, command)
 	if err != nil {
 		return res, err
 	}
 	if len(flags.positional) != arity {
-		return res, fmt.Errorf("参数数量不正确")
+		return res, fmt.Errorf("%s", usage)
 	}
 	res.flags = flags
 	res.label = strings.TrimSpace(flags.positional[0])
 	if !validLabel(res.label) {
 		return res, fmt.Errorf("站点地址不合法")
 	}
-	if !flags.skipDNS {
-		if err := a.checkDNS(res.label); err != nil {
-			return res, err
-		}
-	}
 	return res, nil
 }
 
+// checkDNSIfNeeded 在各 addXxx 完成 flag 校验后统一执行 DNS 检查。
+func (a *App) checkDNSIfNeeded(flags addFlags, label string) error {
+	if !flags.skipDNS {
+		return a.checkDNS(label)
+	}
+	return nil
+}
+
 func (a *App) addProxy(args []string) error {
-	pre, err := a.preAdd(args, "add", 2, validSiteLabel)
+	pre, err := a.preAdd(args, "add", 2, "用法: c add <域名> <端口> [--path <前缀>]", validSiteLabel)
 	if err != nil {
 		return err
 	}
@@ -118,11 +121,14 @@ func (a *App) addProxy(args []string) error {
 			return err
 		}
 	}
+	if err := a.checkDNSIfNeeded(flags, label); err != nil {
+		return err
+	}
 	return a.createSite(label, kind, SiteOptions{Label: label, Port: port, Path: flags.path, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
 }
 
 func (a *App) addStatic(args []string) error {
-	pre, err := a.preAdd(args, "add-static", 2, validSiteLabel)
+	pre, err := a.preAdd(args, "add-static", 2, "用法: c add-static <域名> <目录> [--spa]", validSiteLabel)
 	if err != nil {
 		return err
 	}
@@ -137,11 +143,14 @@ func (a *App) addStatic(args []string) error {
 	if !validStaticRoot(root) {
 		return fmt.Errorf("静态目录不合法")
 	}
+	if err := a.checkDNSIfNeeded(flags, pre.label); err != nil {
+		return err
+	}
 	return a.createSite(pre.label, SiteStatic, SiteOptions{Label: pre.label, Root: root, SPA: flags.spa, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
 }
 
 func (a *App) addEmby(args []string) error {
-	pre, err := a.preAdd(args, "add-emby", 2, validDomain)
+	pre, err := a.preAdd(args, "add-emby", 2, "用法: c add-emby <域名> <目标>", validDomain)
 	if err != nil {
 		return err
 	}
@@ -168,11 +177,14 @@ func (a *App) addEmby(args []string) error {
 			return err
 		}
 	}
+	if err := a.checkDNSIfNeeded(flags, label); err != nil {
+		return err
+	}
 	return a.createSite(label, SiteEmby, SiteOptions{Label: label, Target: target, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
 }
 
 func (a *App) addGateway(args []string) error {
-	pre, err := a.preAdd(args, "add-gateway", 1, validDomain)
+	pre, err := a.preAdd(args, "add-gateway", 1, "用法: c add-gateway <域名> --allow <host:port,...>", validDomain)
 	if err != nil {
 		return err
 	}
@@ -197,6 +209,9 @@ func (a *App) addGateway(args []string) error {
 		if err := a.checkDNS(label); err != nil {
 			return err
 		}
+	}
+	if err := a.checkDNSIfNeeded(flags, label); err != nil {
+		return err
 	}
 	return a.createSite(label, SiteGateway, SiteOptions{Label: label, Scheme: flags.scheme, DNSTLS: flags.dnsTLS, Allow: allow, UnsafeGateway: flags.open})
 }

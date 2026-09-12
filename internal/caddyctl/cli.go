@@ -338,13 +338,27 @@ func (a *App) setKind(args []string, cmd string) error {
 	return fmt.Errorf("未知 set 命令: %s", cmd)
 }
 
+// setNoun 返回 set 系列命令对应的站点类型描述。
+func setNoun(cmd string) string {
+	switch cmd {
+	case "set-static":
+		return "静态站点地址"
+	case "set-emby":
+		return "Emby 站点地址"
+	case "set-gateway":
+		return "网关地址"
+	default:
+		return "站点地址"
+	}
+}
+
 // resolveSetArgs 统一处理 set 系列的「无参→交互、-- 前缀→补 query、单参→交互」逻辑。
 func (a *App) resolveSetArgs(cmd string, args []string) ([]string, error) {
 	if len(args) == 0 {
 		return args, a.interactiveSetCommand(cmd, "")
 	}
 	if strings.HasPrefix(args[0], "--") {
-		query, err := a.readRequiredInput("输入要编辑的站点地址: ")
+		query, err := a.readRequiredInput("输入要编辑的" + setNoun(cmd) + ": ")
 		if err != nil {
 			return nil, err
 		}

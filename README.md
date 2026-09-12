@@ -248,6 +248,10 @@ sudo c add wildcard.example.com 3000 --dns-only --skip-dns-check
 | `CADDYCTL_GO_INSTALLER_REF` | `c install` 获取安装器的分支，默认 `refactor/go` |
 | `CADDYCTL_SKIP_AUTO_IMPORT=1` | 跳过安装后首次运行的已有 Caddyfile 自动导入 |
 
+## 从旧版本升级
+
+v0.2 起生成的站点配置中 email、路径、目标地址均加引号（如 `email "a@b.c"`）。已有部署的 live Caddyfile 为未加引号的旧格式，升级后首次写操作会提示渲染不一致并要求执行 `c import --merge /etc/caddy/Caddyfile` 重新导入，属预期迁移行为。
+
 ## 项目结构
 
 ```text

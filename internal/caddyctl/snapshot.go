@@ -19,7 +19,10 @@ func (a *App) withLock(fn func() error) error {
 	}
 	info, err := os.Lstat(filepath.Dir(a.Paths.Lock))
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("锁目录不安全: %s: %w", filepath.Dir(a.Paths.Lock), err)
+		if err != nil {
+			return fmt.Errorf("锁目录不安全: %s: %w", filepath.Dir(a.Paths.Lock), err)
+		}
+		return fmt.Errorf("锁目录不安全: %s", filepath.Dir(a.Paths.Lock))
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != uint32(os.Geteuid()) {
@@ -33,7 +36,10 @@ func (a *App) withLock(fn func() error) error {
 	defer file.Close()
 	var lockStat syscall.Stat_t
 	if err := syscall.Fstat(fd, &lockStat); err != nil || lockStat.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("锁文件属主不安全: %s: %w", a.Paths.Lock, err)
+		if err != nil {
+			return fmt.Errorf("锁文件属主不安全: %s: %w", a.Paths.Lock, err)
+		}
+		return fmt.Errorf("锁文件属主不安全: %s", a.Paths.Lock)
 	}
 	if err := syscall.Fchmod(fd, 0o600); err != nil {
 		return fmt.Errorf("设置锁文件权限: %w", err)

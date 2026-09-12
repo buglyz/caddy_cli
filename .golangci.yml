@@ -12,8 +12,3 @@ linters:
     - ineffassign
     - unused
     - misspell
-  exclusions:
-    rules:
-      # 暂缓：全仓历史 fmt.Errorf 无 %w 的地方较多，先只对新增代码卡
-      - path: (.+)\.go
-        text: "error wrapping directive"
