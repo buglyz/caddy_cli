@@ -86,13 +86,13 @@ caddyctl-checksums.txt
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh
-sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh
+sudo env CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh
 ```
 
 Cloudflare 版：
 
 ```bash
-sudo CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
+sudo env CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh --cloudflare
 ```
 
 安装器默认下载滚动预发布 `go-latest`。它会先下载并校验 caddyctl 资产；校验失败时不会安装 Caddy、创建配置目录或替换现有 CLI。校验通过后会：
@@ -159,6 +159,8 @@ c undo
 
 # 服务与诊断
 c status
+c start              # 启动 Caddy 服务（另有 c stop / c restart）
+c stop               # 停止 Caddy 服务
 c restart
 c logs
 c doctor
@@ -167,7 +169,18 @@ c version
 c update
 c update --binary    # 同时执行 caddy upgrade --keep-backup，不自动重启服务
 c install-self       # 安装当前正在运行的 Go 二进制及 c 别名
+
+# 其他
+c email admin@example.com   # 设置（或省略参数交互输入）管理邮箱
+c timeout 300               # 服务操作超时（秒），省略参数查看当前值
+c upstream-mode strict      # 上游健康检查模式 warn|strict，省略参数查看当前值
+c cat                       # 输出渲染后的 Caddyfile（同 c config）
+c check                     # 同 c validate
+c reload                    # 同 c apply
+c cf status                 # Cloudflare DNS-01 配置管理（别名 c cloudflare）
 ```
+
+`rm` 别名 `del`/`delete`，`rm-emby` 别名 `del-emby`/`delete-emby`，`list-emby` 别名 `emby-list`，`add-emby` 别名 `emby`，`add-static` 别名 `static`，`add-gateway` 别名 `gateway`，`doctor` 别名 `check-env`，`snapshots` 别名 `snapshot`。完整列表见 `c help`。
 
 默认会检查域名 A/AAAA 是否指向本机。内网、测试或 Cloudflare 代理场景可显式使用：
 

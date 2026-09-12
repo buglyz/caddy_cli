@@ -20,7 +20,11 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: false
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
 
       - name: Install test tools
         run: |
@@ -124,7 +128,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: false
 
       - name: Build installer fixture
         run: |

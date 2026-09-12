@@ -15,9 +15,9 @@ func TestRenderSiteTemplates(t *testing.T) {
 	}{
 		{"proxy https", SiteProxy, SiteOptions{Label: "app.example.com", Port: "3000", Scheme: "https"}, []string{"app.example.com {", "reverse_proxy 127.0.0.1:3000"}, nil},
 		{"proxy http labels", SiteProxy, SiteOptions{Label: "app.example.com,api.example.com", Port: "3000", Scheme: "http"}, []string{"http://app.example.com, http://api.example.com {", "reverse_proxy http://127.0.0.1:3000"}, []string{"tls {"}},
-		{"path", SitePath, SiteOptions{Label: "app.example.com", Port: "3000", Scheme: "https", Path: "/api"}, []string{"uri strip_prefix /api", "respond \"Not Found\" 404"}, nil},
+		{"path", SitePath, SiteOptions{Label: "app.example.com", Port: "3000", Scheme: "https", Path: "/api"}, []string{"uri strip_prefix \"/api\"", "respond \"Not Found\" 404"}, nil},
 		{"static", SiteStatic, SiteOptions{Label: "static.example.com", Root: "/srv/site with spaces", Scheme: "https", SPA: true}, []string{`root * "/srv/site with spaces"`, "try_files {path} /index.html"}, nil},
-		{"emby", SiteEmby, SiteOptions{Label: "emby.example.com", Target: "https://10.0.0.5:8096", Scheme: "https"}, []string{"reverse_proxy https://10.0.0.5:8096", "header_up Host {upstream_hostport}"}, []string{"encode zstd gzip"}},
+		{"emby", SiteEmby, SiteOptions{Label: "emby.example.com", Target: "https://10.0.0.5:8096", Scheme: "https"}, []string{"reverse_proxy \"https://10.0.0.5:8096\"", "header_up Host {upstream_hostport}"}, []string{"encode zstd gzip"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

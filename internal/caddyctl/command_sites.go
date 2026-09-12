@@ -131,7 +131,7 @@ func (a *App) toggleSite(args []string, enable bool) error {
 		target = site.Path + ".disabled"
 	}
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("目标文件已存在: %s", target)
+		return fmt.Errorf("目标文件已存在: %s", target) // err==nil 分支，无底层错误可链
 	}
 	if err := os.Rename(site.Path, target); err != nil {
 		return err

@@ -184,7 +184,7 @@ func (a *App) checkDNS(label string) error {
 		domain = strings.TrimSpace(domain)
 		ips, err := net.LookupIP(domain)
 		if err != nil || len(ips) == 0 {
-			return fmt.Errorf("域名未解析到任何 A/AAAA 记录: %s", domain)
+			return fmt.Errorf("域名未解析到任何 A/AAAA 记录: %s: %w", domain, err)
 		}
 		matched := false
 		for _, ip := range ips {

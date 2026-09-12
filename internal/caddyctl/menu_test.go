@@ -192,7 +192,7 @@ func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, wanted := range []string{"uri strip_prefix /api", "reverse_proxy 127.0.0.1:3000"} {
+	for _, wanted := range []string{"uri strip_prefix \"/api\"", "reverse_proxy 127.0.0.1:3000"} {
 		if !strings.Contains(string(data), wanted) {
 			t.Errorf("menu-created proxy missing %q:\n%s", wanted, data)
 		}
@@ -228,7 +228,7 @@ func TestInteractiveMenuAddsEmbyAndRestrictedGateway(t *testing.T) {
 	app, _, _ := newTestApp(t, input)
 	runOK(t, app)
 	checks := map[string][]string{
-		"emby.example.com.conf": {"reverse_proxy https://10.0.0.5:8096", "header_up Host {upstream_hostport}"},
+		"emby.example.com.conf": {"reverse_proxy \"https://10.0.0.5:8096\"", "header_up Host {upstream_hostport}"},
 		"gate.example.com.conf": {"# 上游限制: 仅允许: emby.example.com:443", `respond "upstream is not allowed" 403`},
 	}
 	for name, wantedValues := range checks {

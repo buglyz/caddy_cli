@@ -1,6 +1,6 @@
 VERSION ?= dev
 
-.PHONY: build test race vet fmt-check check clean
+.PHONY: build test race vet lint fmt-check check clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath \
@@ -16,10 +16,13 @@ race:
 vet:
 	go vet ./...
 
+lint:
+	golangci-lint run
+
 fmt-check:
 	test -z "$$(gofmt -l cmd internal)"
 
-check: fmt-check test race vet
+check: fmt-check test race vet lint
 
 clean:
 	rm -rf bin

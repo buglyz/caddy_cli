@@ -53,7 +53,7 @@ func (a *App) validate(data []byte) error {
 	cmd.Env = append(os.Environ(), readEnvFile(a.Paths.CloudflareEnv)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("配置校验失败: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf("配置校验失败: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
@@ -100,9 +100,13 @@ func (a *App) apply() error {
 	}
 	if err := a.reload(); err != nil {
 		if hadOld {
-			_ = atomicWrite(a.Paths.Caddyfile, old, 0o644)
+			if rwErr := atomicWrite(a.Paths.Caddyfile, old, 0o644); rwErr != nil {
+				fmt.Fprintf(a.Err, "警告: 恢复 live Caddyfile 失败: %v\n", rwErr)
+			}
 		} else {
-			_ = os.Remove(a.Paths.Caddyfile)
+			if rmErr := os.Remove(a.Paths.Caddyfile); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				fmt.Fprintf(a.Err, "警告: 移除 live Caddyfile 失败: %v\n", rmErr)
+			}
 		}
 		return fmt.Errorf("重载失败，已恢复 live Caddyfile: %w", err)
 	}
@@ -183,7 +187,7 @@ func runServiceCommand(timeout int, backend, action string) error {
 		return fmt.Errorf("服务操作超时（%ds）", timeout)
 	}
 	if err != nil {
-		return fmt.Errorf("%s: %s", action, strings.TrimSpace(string(output)))
+		return fmt.Errorf("%s: %s: %w", action, strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
@@ -191,7 +195,7 @@ func runServiceCommand(timeout int, backend, action string) error {
 func (a *App) caddyExists() error {
 	if strings.ContainsRune(a.CaddyBin, filepath.Separator) {
 		if info, err := os.Stat(a.CaddyBin); err != nil || info.Mode()&0o111 == 0 {
-			return fmt.Errorf("未找到可执行 caddy: %s", a.CaddyBin)
+			return fmt.Errorf("未找到可执行 caddy: %s: %w", a.CaddyBin, err)
 		}
 		return nil
 	}

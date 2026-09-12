@@ -231,7 +231,9 @@ func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {
 		return fmt.Errorf("替换 sites.d: %w", err)
 	}
 	if err := replaceDir(globalsStage, a.Paths.Globals); err != nil {
-		_ = rollbackDirs(fmt.Errorf("替换 globals.d 失败"))
+		if rbErr := rollbackDirs(fmt.Errorf("替换 globals.d 失败")); rbErr != nil {
+			fmt.Fprintf(a.Err, "警告: 导入回滚目录时出错: %v\n", rbErr)
+		}
 		a.State.Email = oldEmail
 		return fmt.Errorf("替换 globals.d: %w", err)
 	}

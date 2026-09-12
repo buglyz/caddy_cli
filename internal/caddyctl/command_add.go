@@ -61,24 +61,47 @@ func parseAddFlags(args []string, command string) (addFlags, error) {
 	return result, nil
 }
 
+// preAdd 统一 add 系列的公共前置：参数解析、arity、不支持 flag 拒绝、DNS 校验。
+type preAddResult struct {
+	flags addFlags
+	label string
+}
+
+func (a *App) preAdd(args []string, command string, arity int, validLabel func(string) bool) (preAddResult, error) {
+	var res preAddResult
+	flags, err := parseAddFlags(args, command)
+	if err != nil {
+		return res, err
+	}
+	if len(flags.positional) != arity {
+		return res, fmt.Errorf("参数数量不正确")
+	}
+	res.flags = flags
+	res.label = strings.TrimSpace(flags.positional[0])
+	if !validLabel(res.label) {
+		return res, fmt.Errorf("站点地址不合法")
+	}
+	if !flags.skipDNS {
+		if err := a.checkDNS(res.label); err != nil {
+			return res, err
+		}
+	}
+	return res, nil
+}
+
 func (a *App) addProxy(args []string) error {
-	flags, err := parseAddFlags(args, "add")
+	pre, err := a.preAdd(args, "add", 2, validSiteLabel)
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) != 2 {
-		return fmt.Errorf("用法: c add <域名> <端口> [--path <前缀>]")
-	}
+	flags := pre.flags
 	if flags.spa || flags.allowSeen || flags.open {
 		return fmt.Errorf("add 不支持 --spa、--allow 或 --unsafe-open-proxy")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
 	}
-	label, port := strings.TrimSpace(flags.positional[0]), flags.positional[1]
-	if !validSiteLabel(label) {
-		return fmt.Errorf("站点地址不合法")
-	}
+	label, port := pre.label, flags.positional[1]
 	if !validPort(port) {
 		return fmt.Errorf("端口不合法")
 	}
@@ -99,49 +122,37 @@ func (a *App) addProxy(args []string) error {
 }
 
 func (a *App) addStatic(args []string) error {
-	flags, err := parseAddFlags(args, "add-static")
+	pre, err := a.preAdd(args, "add-static", 2, validSiteLabel)
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) != 2 {
-		return fmt.Errorf("用法: c add-static <域名> <目录> [--spa]")
-	}
+	flags := pre.flags
 	if flags.pathSeen || flags.allowSeen || flags.open {
 		return fmt.Errorf("add-static 不支持 --path、--allow 或 --unsafe-open-proxy")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
 	}
-	label, root := strings.TrimSpace(flags.positional[0]), strings.TrimSpace(flags.positional[1])
-	if !validSiteLabel(label) || !validStaticRoot(root) {
-		return fmt.Errorf("站点地址或静态目录不合法")
+	root := strings.TrimSpace(flags.positional[1])
+	if !validStaticRoot(root) {
+		return fmt.Errorf("静态目录不合法")
 	}
-	if !flags.skipDNS {
-		if err := a.checkDNS(label); err != nil {
-			return err
-		}
-	}
-	return a.createSite(label, SiteStatic, SiteOptions{Label: label, Root: root, SPA: flags.spa, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
+	return a.createSite(pre.label, SiteStatic, SiteOptions{Label: pre.label, Root: root, SPA: flags.spa, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
 }
 
 func (a *App) addEmby(args []string) error {
-	flags, err := parseAddFlags(args, "add-emby")
+	pre, err := a.preAdd(args, "add-emby", 2, validDomain)
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) != 2 {
-		return fmt.Errorf("用法: c add-emby <域名> <目标>")
-	}
+	flags := pre.flags
 	if flags.pathSeen || flags.spa || flags.allowSeen || flags.open {
 		return fmt.Errorf("add-emby 不支持 --path、--spa、--allow 或 --unsafe-open-proxy")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
 	}
-	label, target := strings.TrimSpace(flags.positional[0]), strings.TrimSpace(flags.positional[1])
-	if !validDomain(label) {
-		return fmt.Errorf("域名不合法")
-	}
+	label, target := pre.label, strings.TrimSpace(flags.positional[1])
 	if !strings.Contains(target, "://") {
 		target = "https://" + target
 	}
@@ -161,23 +172,18 @@ func (a *App) addEmby(args []string) error {
 }
 
 func (a *App) addGateway(args []string) error {
-	flags, err := parseAddFlags(args, "add-gateway")
+	pre, err := a.preAdd(args, "add-gateway", 1, validDomain)
 	if err != nil {
 		return err
 	}
-	if len(flags.positional) != 1 {
-		return fmt.Errorf("用法: c add-gateway <域名> --allow <host:port,...>")
-	}
+	flags := pre.flags
 	if flags.pathSeen || flags.spa {
 		return fmt.Errorf("add-gateway 不支持 --path 或 --spa")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
 	}
-	label := strings.TrimSpace(flags.positional[0])
-	if !validDomain(label) {
-		return fmt.Errorf("域名不合法")
-	}
+	label := pre.label
 	var allow []string
 	if flags.allowSeen {
 		allow, err = parseGatewayAllow(flags.allow)

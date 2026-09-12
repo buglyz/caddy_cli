@@ -95,9 +95,13 @@ func (a *App) changeCloudflareEnv(content []byte) error {
 	}
 	if err := a.apply(); err != nil {
 		if hadOld {
-			_ = atomicWrite(a.Paths.CloudflareEnv, old, 0o600)
+			if rwErr := atomicWrite(a.Paths.CloudflareEnv, old, 0o600); rwErr != nil {
+				fmt.Fprintf(a.Err, "警告: 恢复 cloudflare.env 失败: %v\n", rwErr)
+			}
 		} else {
-			_ = os.Remove(a.Paths.CloudflareEnv)
+			if rmErr := os.Remove(a.Paths.CloudflareEnv); rmErr != nil && !os.IsNotExist(rmErr) {
+				fmt.Fprintf(a.Err, "警告: 移除 cloudflare.env 失败: %v\n", rmErr)
+			}
 		}
 		return fmt.Errorf("应用 Cloudflare 设置失败，已恢复环境文件: %w", err)
 	}
@@ -186,6 +190,9 @@ func unescapeEnv(raw string) (string, error) {
 	var out strings.Builder
 	escaped := false
 	for _, char := range raw {
+		if char == '\n' || char == '\r' {
+			return "", fmt.Errorf("cloudflare.env 值不允许包含换行符")
+		}
 		if escaped {
 			switch char {
 			case '\\', '"':

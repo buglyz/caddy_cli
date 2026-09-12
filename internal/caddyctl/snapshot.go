@@ -19,7 +19,7 @@ func (a *App) withLock(fn func() error) error {
 	}
 	info, err := os.Lstat(filepath.Dir(a.Paths.Lock))
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("锁目录不安全: %s", filepath.Dir(a.Paths.Lock))
+		return fmt.Errorf("锁目录不安全: %s: %w", filepath.Dir(a.Paths.Lock), err)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != uint32(os.Geteuid()) {
@@ -33,7 +33,7 @@ func (a *App) withLock(fn func() error) error {
 	defer file.Close()
 	var lockStat syscall.Stat_t
 	if err := syscall.Fstat(fd, &lockStat); err != nil || lockStat.Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("锁文件属主不安全: %s", a.Paths.Lock)
+		return fmt.Errorf("锁文件属主不安全: %s: %w", a.Paths.Lock, err)
 	}
 	if err := syscall.Fchmod(fd, 0o600); err != nil {
 		return fmt.Errorf("设置锁文件权限: %w", err)
@@ -173,34 +173,34 @@ func (a *App) snapshotPath(requested string) (string, error) {
 	return path, a.validateSnapshot(path)
 }
 
+// checkEntry 校验快照内条目存在、非符号链接且类型正确（目录或普通文件）。
+func checkEntry(path, name string, wantDir bool) error {
+	info, err := os.Lstat(filepath.Join(path, name))
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() != wantDir {
+		return fmt.Errorf("%s 类型不安全", name)
+	}
+	return nil
+}
+
 func (a *App) validateSnapshot(path string) error {
 	clean := filepath.Clean(path)
 	rel, err := filepath.Rel(a.Paths.Snapshots, clean)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
 		return fmt.Errorf("快照路径不合法")
 	}
-	rootInfo, statErr := os.Lstat(clean)
-	if statErr != nil || rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+	if err := checkEntry(filepath.Dir(clean), filepath.Base(clean), true); err != nil {
 		return fmt.Errorf("快照目录不安全: %s", filepath.Base(clean))
 	}
-	for _, name := range []string{"sites", "globals"} {
-		info, statErr := os.Lstat(filepath.Join(clean, name))
-		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	for _, name := range []string{"sites", "globals", "meta", "manifest"} {
+		if err := checkEntry(clean, name, name != "meta" && name != "manifest"); err != nil {
+			if errors.Is(err, os.ErrNotExist) && name == "manifest" {
+				continue // manifest 允许缺失（旧版快照），snapshotManifest 会兜底
+			}
 			return fmt.Errorf("快照结构不完整: %s", filepath.Base(clean))
 		}
-	}
-	for _, name := range []string{"meta"} {
-		info, statErr := os.Lstat(filepath.Join(clean, name))
-		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return fmt.Errorf("快照结构不完整: %s", filepath.Base(clean))
-		}
-	}
-	if info, statErr := os.Lstat(filepath.Join(clean, "manifest")); statErr == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return fmt.Errorf("快照 manifest 不合法")
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return fmt.Errorf("读取快照 manifest: %w", statErr)
 	}
 	values, err := snapshotManifest(clean)
 	if err != nil || values["FORMAT"] != "1" {

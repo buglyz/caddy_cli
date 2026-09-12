@@ -111,7 +111,9 @@ func replaceDir(src, dst string) error {
 		return err
 	}
 	if err := os.Rename(stage, dst); err != nil {
-		_ = os.Rename(old, dst)
+		if rbErr := os.Rename(old, dst); rbErr != nil && !errors.Is(rbErr, os.ErrNotExist) {
+			return fmt.Errorf("%s；且回滚 %s 失败: %w", err, old, rbErr)
+		}
 		return err
 	}
 	return os.RemoveAll(old)

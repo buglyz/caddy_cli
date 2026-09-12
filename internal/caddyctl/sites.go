@@ -168,9 +168,13 @@ func (a *App) commitSite(path string, data []byte) error {
 	}
 	if err := a.apply(); err != nil {
 		if hadOld {
-			_ = atomicWrite(path, old, 0o644)
+			if rwErr := atomicWrite(path, old, 0o644); rwErr != nil {
+				fmt.Fprintf(a.Err, "警告: 恢复站点文件 %s 失败: %v\n", path, rwErr)
+			}
 		} else {
-			_ = os.Remove(path)
+			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				fmt.Fprintf(a.Err, "警告: 移除站点文件 %s 失败: %v\n", path, rmErr)
+			}
 		}
 		return fmt.Errorf("配置应用失败，已回滚站点文件: %w", err)
 	}
@@ -186,7 +190,9 @@ func (a *App) removeSiteFile(site siteFile) error {
 		return nil
 	}
 	if err := a.apply(); err != nil {
-		_ = atomicWrite(site.Path, old, 0o644)
+		if rwErr := atomicWrite(site.Path, old, 0o644); rwErr != nil {
+			fmt.Fprintf(a.Err, "警告: 回滚删除操作失败（%s）: %v\n", site.Path, rwErr)
+		}
 		return fmt.Errorf("配置应用失败，已回滚删除操作: %w", err)
 	}
 	return nil

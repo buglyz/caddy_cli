@@ -38,7 +38,7 @@ func (a *App) renderManaged() ([]byte, error) {
 	if a.State.Email != "" || len(globals) > 0 {
 		out.WriteString("{\n")
 		if a.State.Email != "" {
-			fmt.Fprintf(&out, "    email %s\n", a.State.Email)
+			fmt.Fprintf(&out, "    email %s\n", quoteCaddy(a.State.Email))
 		}
 		for _, path := range globals {
 			data, readErr := os.ReadFile(path)
@@ -98,7 +98,7 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 		if opts.Scheme == "http" {
 			target = "http://" + target
 		}
-		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    %s path %s %s/*\n    handle %s {\n        uri strip_prefix %s\n        reverse_proxy %s\n    }\n    handle {\n        respond \"Not Found\" 404\n    }\n}\n", label, tls, matcher, opts.Path, opts.Path, matcher, opts.Path, target), nil
+		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    %s path %s %s/*\n    handle %s {\n        uri strip_prefix %s\n        reverse_proxy %s\n    }\n    handle {\n        respond \"Not Found\" 404\n    }\n}\n", label, tls, matcher, quoteCaddy(opts.Path), quoteCaddy(opts.Path+"/*"), matcher, quoteCaddy(opts.Path), target), nil
 	case SiteStatic:
 		spa := ""
 		if opts.SPA {
@@ -115,11 +115,11 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 			if isIPHost(opts.Target) {
 				tlsLine = "            tls\n            tls_insecure_skip_verify\n"
 			}
-			transport = "        transport http {\n" + tlsLine + "            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+			transport = transportBlock("        ", tlsLine)
 		} else {
-			transport = "        transport http {\n            keepalive 30s\n            keepalive_idle_conns 100\n            keepalive_idle_conns_per_host 10\n        }\n"
+			transport = transportBlock("        ", "")
 		}
-		return fmt.Sprintf("%s {\n%s    reverse_proxy %s {\n        header_up Host {upstream_hostport}\n%s        flush_interval -1\n    }\n}\n", label, tls, opts.Target, transport), nil
+		return fmt.Sprintf("%s {\n%s    reverse_proxy %s {\n        header_up Host {upstream_hostport}\n%s        flush_interval -1\n    }\n}\n", label, tls, quoteCaddy(opts.Target), transport), nil
 	case SiteGateway:
 		return renderGateway(opts, tls)
 	default:
@@ -194,4 +194,19 @@ func normalizeCaddyfile(data []byte) []byte {
 		joined = strings.ReplaceAll(joined, "\n\n\n", "\n\n")
 	}
 	return []byte(strings.TrimSpace(joined))
+}
+
+// transportBlock 生成 Caddyfile transport http 块（keepalive 连接池）。
+// insecure 为 true 时对内网 HTTPS 上游加 tls_insecure_skip_verify。
+// indent 为每行前导空格（外层调用者决定层级）。
+func transportBlock(indent string, tlsLine string) string {
+	out := indent + "transport http {\n"
+	if tlsLine != "" {
+		out += tlsLine
+	}
+	out += indent + "    keepalive 30s\n"
+	out += indent + "    keepalive_idle_conns 100\n"
+	out += indent + "    keepalive_idle_conns_per_host 10\n"
+	out += indent + "}\n"
+	return out
 }

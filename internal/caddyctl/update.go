@@ -161,7 +161,7 @@ func updateBinary(destination, version string) error {
 		return err
 	}
 	if output, err := exec.Command(tmpPath, "--help").CombinedOutput(); err != nil {
-		return fmt.Errorf("新二进制自检失败: %s", strings.TrimSpace(string(output)))
+		return fmt.Errorf("新二进制自检失败: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	if _, err := os.Stat(destination); err == nil {
 		if err := copyFile(destination, destination+".bak", 0o755); err != nil {

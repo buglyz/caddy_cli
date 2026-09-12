@@ -78,62 +78,16 @@ func (a *App) Run(args []string) error {
 			return a.interactiveAddCommand("gateway")
 		}
 		return a.mutate("add-gateway", func() error { return a.addGateway(args) })
-	case "set":
-		if len(args) == 0 {
-			return a.interactiveSetCommand("set", "")
+	case "set", "set-static", "set-emby", "set-gateway":
+		var args2, err = a.resolveSetArgs(cmd, args)
+		if err != nil {
+			return err
 		}
-		if strings.HasPrefix(args[0], "--") {
-			query, err := a.readRequiredInput("输入要编辑的站点地址: ")
-			if err != nil {
-				return err
-			}
-			args = append([]string{query}, args...)
-		} else if len(args) == 1 {
-			return a.interactiveSetCommand("set", args[0])
+		args = args2
+		if len(args) > 1 {
+			return a.mutate(cmd, func() error { return a.setKind(args, cmd) })
 		}
-		return a.mutate("set", func() error { return a.setSite(args) })
-	case "set-static":
-		if len(args) == 0 {
-			return a.interactiveSetCommand("set-static", "")
-		}
-		if strings.HasPrefix(args[0], "--") {
-			query, err := a.readRequiredInput("输入要编辑的静态站点地址: ")
-			if err != nil {
-				return err
-			}
-			args = append([]string{query}, args...)
-		} else if len(args) == 1 {
-			return a.interactiveSetCommand("set-static", args[0])
-		}
-		return a.mutate("set-static", func() error { return a.setStatic(args) })
-	case "set-emby":
-		if len(args) == 0 {
-			return a.interactiveSetCommand("set-emby", "")
-		}
-		if strings.HasPrefix(args[0], "--") {
-			query, err := a.readRequiredInput("输入要编辑的 Emby 站点地址: ")
-			if err != nil {
-				return err
-			}
-			args = append([]string{query}, args...)
-		} else if len(args) == 1 {
-			return a.interactiveSetCommand("set-emby", args[0])
-		}
-		return a.mutate("set-emby", func() error { return a.setEmby(args) })
-	case "set-gateway":
-		if len(args) == 0 {
-			return a.interactiveSetCommand("set-gateway", "")
-		}
-		if strings.HasPrefix(args[0], "--") {
-			query, err := a.readRequiredInput("输入要编辑的网关地址: ")
-			if err != nil {
-				return err
-			}
-			args = append([]string{query}, args...)
-		} else if len(args) == 1 {
-			return a.interactiveSetCommand("set-gateway", args[0])
-		}
-		return a.mutate("set-gateway", func() error { return a.setGateway(args) })
+		return nil
 	case "rm", "del", "delete":
 		if len(args) == 0 {
 			query, err := a.readRequiredInput("输入要删除的站点地址: ")
@@ -367,4 +321,37 @@ func (a *App) setEmail(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// setKind 按命令名分派到对应的 setXxx 处理器。
+func (a *App) setKind(args []string, cmd string) error {
+	switch cmd {
+	case "set":
+		return a.setSite(args)
+	case "set-static":
+		return a.setStatic(args)
+	case "set-emby":
+		return a.setEmby(args)
+	case "set-gateway":
+		return a.setGateway(args)
+	}
+	return fmt.Errorf("未知 set 命令: %s", cmd)
+}
+
+// resolveSetArgs 统一处理 set 系列的「无参→交互、-- 前缀→补 query、单参→交互」逻辑。
+func (a *App) resolveSetArgs(cmd string, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return args, a.interactiveSetCommand(cmd, "")
+	}
+	if strings.HasPrefix(args[0], "--") {
+		query, err := a.readRequiredInput("输入要编辑的站点地址: ")
+		if err != nil {
+			return nil, err
+		}
+		return append([]string{query}, args...), nil
+	}
+	if len(args) == 1 {
+		return args, a.interactiveSetCommand(cmd, args[0])
+	}
+	return args, nil
 }

@@ -136,12 +136,12 @@ func rollbackRestoreItems(items []*restoreItem) error {
 			continue
 		}
 		if err := os.RemoveAll(item.destination); err != nil {
-			result = errors.Join(result, err)
+			result = joinErrors(result, err)
 			continue
 		}
 		if item.hadOld {
 			if err := os.Rename(item.old, item.destination); err != nil {
-				result = errors.Join(result, err)
+				result = joinErrors(result, err)
 				continue
 			}
 			item.old, item.hadOld = "", false
