@@ -75,6 +75,8 @@ download() {
         curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 --max-time 120 \
             "$url" -o "$output"
     elif command -v wget >/dev/null 2>&1; then
+        # 注意: wget 的 -T/--timeout 是网络超时而非总时长上限（与 curl --max-time 不对齐），
+        # -T 120 作为总超时兜底；行为差异可接受。
         wget -q -T 120 --tries 3 --timeout 15 -O "$output" "$url"
     else
         die "curl or wget is required"

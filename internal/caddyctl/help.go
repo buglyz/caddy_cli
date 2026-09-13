@@ -30,7 +30,9 @@ func (a *App) help() {
 
 服务与维护:
   c start | restart | stop | status | logs
-  c cloudflare set|check|remove
+  c doctor            # 环境体检（别名 check-env）
+  c cert-check <域名> # 证书/HTTPS 诊断
+  c cloudflare set|check|remove   # 别名 cf
   c install [--cloudflare]
   c install-self
   c update [--latest|--ref <release-tag>] [--binary]

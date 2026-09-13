@@ -42,3 +42,13 @@ argument. The token is stored in `/etc/caddy/cloudflare.env` with mode `0600`.
 `add-gateway` requires an explicit `--allow host:port,...` list by default.
 Only use `--unsafe-open-proxy` when another authentication or network-isolation
 layer protects the gateway.
+
+## Lock and test isolation
+
+The global operation lock rejects lock directories or lock files that are
+symlinks, not owned by the current effective user, or group/other-writable.
+`CADDYCTL_ROOT` redirects the entire managed layout to an isolated directory,
+so tests never touch production `/etc/caddy`.
+
+Pre-install configuration backups under `/etc/caddy/backup` keep the most
+recent **10** copies (distinct from the 30 snapshot copies kept for rollback).

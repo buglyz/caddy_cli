@@ -48,7 +48,9 @@ curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/instal
 如需固定 caddyctl 二进制版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh | sudo env CADDYCTL_GO_VERSION=v0.1.0 bash
+curl -fsSLO https://raw.githubusercontent.com/buglyz/caddy_cli/refactor/go/install-go.sh
+sha256sum install-go.sh   # 可选：先校验再执行
+sudo env CADDYCTL_GO_VERSION=v0.1.0 bash install-go.sh
 ```
 
 ### 从源码安装
