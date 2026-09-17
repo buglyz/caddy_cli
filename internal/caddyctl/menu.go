@@ -26,23 +26,26 @@ func (a *App) interactiveMenu() error {
 		}
 		switch choice {
 		case "1":
-			m.run("list")
+			m.addProxyLoop()
 			m.pause()
 		case "2":
-			m.run("restart")
+			m.run("list")
 			m.pause()
 		case "3":
-			m.run("logs")
+			m.run("restart")
 			m.pause()
 		case "4":
-			m.sitesMenu()
+			m.run("logs")
+			m.pause()
 		case "5":
-			m.embyMenu()
+			m.sitesMenu()
 		case "6":
-			m.configMenu()
+			m.embyMenu()
 		case "7":
-			m.diagnosticsMenu()
+			m.configMenu()
 		case "8":
+			m.diagnosticsMenu()
+		case "9":
 			m.installMenu()
 		case "0", "q", "quit", "exit":
 			return nil
@@ -59,18 +62,19 @@ func (m *menuSession) printMain() {
 ====== Caddy CLI 管理面板 ======
 
 【快速操作】
-1. 查看所有站点状态
-2. 重启 Caddy 服务
-3. 查看最近日志
+1. 添加反向代理
+2. 查看所有站点状态
+3. 重启 Caddy 服务
+4. 查看最近日志
 
 【站点管理】
-4. 站点管理
-5. Emby 专用管理
+5. 站点管理
+6. Emby 专用管理
 
 【系统管理】
-6. 服务与配置
-7. 诊断与维护
-8. 安装与更新
+7. 服务与配置
+8. 诊断与维护
+9. 安装与更新
 
 0. 退出
 ============================

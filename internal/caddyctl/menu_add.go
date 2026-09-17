@@ -22,6 +22,16 @@ func (a *App) interactiveAddCommand(kind string) error {
 	return m.actionError()
 }
 
+func (m *menuSession) addProxyLoop() {
+	for {
+		m.addProxy()
+		cont, ok := m.yesNo("是否继续添加下一个站点？", false)
+		if !ok || !cont {
+			return
+		}
+	}
+}
+
 func (m *menuSession) addProxy() {
 	label, ok := m.required("站点地址（如 example.com）: ")
 	if !ok {

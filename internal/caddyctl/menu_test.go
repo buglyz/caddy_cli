@@ -41,11 +41,11 @@ func TestInteractiveTerminalRejectsUnsupportedOutput(t *testing.T) {
 
 func TestMenuClearsEveryLevelOnInteractiveTerminal(t *testing.T) {
 	input := strings.Join([]string{
-		"4", "4", "0", "0",
 		"5", "4", "0", "0",
-		"6", "7", "0", "12", "0", "0",
-		"7", "0",
+		"6", "4", "0", "0",
+		"7", "7", "0", "12", "0", "0",
 		"8", "0",
+		"9", "0",
 		"0",
 	}, "\n") + "\n"
 	app, out, _ := newTestApp(t, input)
@@ -87,16 +87,17 @@ func TestMainMenuSectionsAndNumbering(t *testing.T) {
 	menu := out.String()
 	items := []string{
 		"【快速操作】",
-		"1. 查看所有站点状态",
-		"2. 重启 Caddy 服务",
-		"3. 查看最近日志",
+		"1. 添加反向代理",
+		"2. 查看所有站点状态",
+		"3. 重启 Caddy 服务",
+		"4. 查看最近日志",
 		"【站点管理】",
-		"4. 站点管理",
-		"5. Emby 专用管理",
+		"5. 站点管理",
+		"6. Emby 专用管理",
 		"【系统管理】",
-		"6. 服务与配置",
-		"7. 诊断与维护",
-		"8. 安装与更新",
+		"7. 服务与配置",
+		"8. 诊断与维护",
+		"9. 安装与更新",
 		"0. 退出",
 	}
 	previous := -1
@@ -115,7 +116,7 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 	app, out, errOut := newTestApp(t, "")
 	runOK(t, app, "add", "quick.example.com", "3000", "--skip-dns-check")
 	out.Reset()
-	app.In = strings.NewReader("1\n\n0\n")
+	app.In = strings.NewReader("2\n\n0\n")
 	runOK(t, app)
 	if !strings.Contains(out.String(), "quick.example.com") {
 		t.Fatalf("quick site list did not run: %s", out.String())
@@ -134,7 +135,7 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 		t.Setenv("CADDYCTL_TEST_SERVICE_ACTION", recordPath)
 		isolatedRoot := app.Paths.Root
 		app.Paths.Root = ""
-		app.In = strings.NewReader("2\n\n0\n")
+		app.In = strings.NewReader("3\n\n0\n")
 		runOK(t, app)
 		app.Paths.Root = isolatedRoot
 		action, err := os.ReadFile(recordPath)
@@ -142,7 +143,7 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 			t.Fatalf("quick restart action=%q err=%v stderr=%s", action, err, errOut.String())
 		}
 	} else {
-		app.In = strings.NewReader("2\n\n0\n")
+		app.In = strings.NewReader("3\n\n0\n")
 		runOK(t, app)
 		if !strings.Contains(errOut.String(), "隔离模式不执行 Caddy 服务操作") {
 			t.Fatalf("quick service action did not run: %s", errOut.String())
@@ -157,7 +158,7 @@ func TestMainMenuQuickActionsKeepCommandMappings(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	app.In = strings.NewReader("3\n\n0\n")
+	app.In = strings.NewReader("4\n\n0\n")
 	runOK(t, app)
 	if !strings.Contains(out.String(), "quick-log-entry") {
 		t.Fatalf("quick logs did not run: %s", out.String())
@@ -175,15 +176,14 @@ func TestRegularCommandDoesNotClearInteractiveTerminal(t *testing.T) {
 
 func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 	input := strings.Join([]string{
-		"4", // main: sites
-		"2", // add proxy
+		"1", // main: add proxy
 		"app.example.com",
 		"3000",
 		"/api",
 		"",  // HTTPS default
 		"y", // skip DNS check
+		"n", // 不继续添加下一个
 		"",  // pause
-		"0", // sites: back
 		"0", // main: exit
 	}, "\n") + "\n"
 	app, out, _ := newTestApp(t, input)
@@ -202,9 +202,35 @@ func TestInteractiveMenuAddsPathProxy(t *testing.T) {
 	}
 }
 
+func TestMainMenuAddProxySupportsConsecutiveAdds(t *testing.T) {
+	input := strings.Join([]string{
+		"1", // main: add proxy
+		"a.example.com", "3000", "", "", "y",
+		"y", // 继续添加下一个
+		"b.example.com", "3001", "", "", "y",
+		"n", // 不继续
+		"",  // pause
+		"0", // main: exit
+	}, "\n") + "\n"
+	app, _, _ := newTestApp(t, input)
+	runOK(t, app)
+	for name, port := range map[string]string{
+		"a.example.com.conf": "reverse_proxy 127.0.0.1:3000",
+		"b.example.com.conf": "reverse_proxy 127.0.0.1:3001",
+	} {
+		data, err := os.ReadFile(filepath.Join(app.Paths.Sites, name))
+		if err != nil {
+			t.Fatalf("consecutive add missing %s: %v", name, err)
+		}
+		if !strings.Contains(string(data), port) {
+			t.Errorf("%s missing %q:\n%s", name, port, data)
+		}
+	}
+}
+
 func TestInteractiveMenuAddsStaticSite(t *testing.T) {
 	input := strings.Join([]string{
-		"4", "3", "static.example.com", "/srv/site", "y", "2", "y", "", "0", "0",
+		"5", "3", "static.example.com", "/srv/site", "y", "2", "y", "", "0", "0",
 	}, "\n") + "\n"
 	app, _, _ := newTestApp(t, input)
 	runOK(t, app, "menu")
@@ -221,7 +247,7 @@ func TestInteractiveMenuAddsStaticSite(t *testing.T) {
 
 func TestInteractiveMenuAddsEmbyAndRestrictedGateway(t *testing.T) {
 	input := strings.Join([]string{
-		"5", "2", "emby.example.com", "https://10.0.0.5:8096", "", "y", "",
+		"6", "2", "emby.example.com", "https://10.0.0.5:8096", "", "y", "",
 		"3", "gate.example.com", "emby.example.com:443", "", "y", "",
 		"0", "0",
 	}, "\n") + "\n"
@@ -246,7 +272,7 @@ func TestInteractiveMenuAddsEmbyAndRestrictedGateway(t *testing.T) {
 
 func TestInteractiveMenuCanModifyDisableAndCancelRemoval(t *testing.T) {
 	input := strings.Join([]string{
-		"4", "4", "1", "app.example.com", "4000", "", "0", "", "0",
+		"5", "4", "1", "app.example.com", "4000", "", "0", "", "0",
 		"5", "app.example.com", "2", "",
 		"6", "app.example.com", "n", "",
 		"0", "0",
