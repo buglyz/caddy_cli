@@ -3,6 +3,8 @@ package caddyctl
 import (
 	"bytes"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +17,7 @@ type SiteKind string
 const (
 	SiteProxy   SiteKind = "反代站点"
 	SitePath    SiteKind = "路径反代"
+	SiteRemote  SiteKind = "远程反代"
 	SiteStatic  SiteKind = "静态站点"
 	SiteEmby    SiteKind = "Emby反代"
 	SiteGateway SiteKind = "网关"
@@ -23,7 +26,7 @@ const (
 
 type SiteOptions struct {
 	Label, Scheme, Port, Path, Root, Target string
-	SPA, DNSTLS                             bool
+	SPA, DNSTLS, Stream                     bool
 	Allow                                   []string
 	UnsafeGateway                           bool
 }
@@ -91,7 +94,11 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 		if opts.Scheme == "http" {
 			target = "http://" + target
 		}
-		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s\n}\n", label, tls, target), nil
+		stream := ""
+		if opts.Stream {
+			stream = "    flush_interval -1\n"
+		}
+		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s%s    reverse_proxy %s\n}\n", label, tls, stream, target), nil
 	case SitePath:
 		matcher := "@path_" + sanitizeName(primaryLabel(opts.Label)) + "_" + sanitizeName(opts.Path)
 		target := "127.0.0.1:" + opts.Port
@@ -99,6 +106,30 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 			target = "http://" + target
 		}
 		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    %s path %s %s/*\n    handle %s {\n        uri strip_prefix %s\n        reverse_proxy %s\n    }\n    handle {\n        respond \"Not Found\" 404\n    }\n}\n", label, tls, matcher, quoteCaddy(opts.Path), quoteCaddy(opts.Path+"/*"), matcher, quoteCaddy(opts.Path), target), nil
+	case SiteRemote:
+		// 远程 HTTPS 上游（PaaS 边缘如 Northflank *.code.run、Cloudflare）按 Host 头路由
+		// 且证书只匹配自己的域名：必须改写 Host 并显式指定 SNI，否则 404/503 或握手失败。
+		host := remoteHost(opts.Target)
+		if host == "" {
+			return "", fmt.Errorf("无法解析目标主机: %s", opts.Target)
+		}
+		var transport strings.Builder
+		transport.WriteString("        transport http {\n")
+		if strings.HasPrefix(opts.Target, "https://") {
+			transport.WriteString("            tls\n")
+			transport.WriteString("            tls_server_name " + host + "\n")
+		}
+		transport.WriteString("            dial_timeout 5s\n")
+		transport.WriteString("            response_header_timeout 300s\n")
+		transport.WriteString("            keepalive 30s\n")
+		transport.WriteString("            keepalive_idle_conns 100\n")
+		transport.WriteString("            keepalive_idle_conns_per_host 10\n")
+		transport.WriteString("        }\n")
+		stream := ""
+		if opts.Stream {
+			stream = "        flush_interval -1\n"
+		}
+		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s {\n        header_up Host %s\n%s    }\n%s}\n", label, tls, quoteCaddy(opts.Target), host, stream, transport.String()), nil
 	case SiteStatic:
 		spa := ""
 		if opts.SPA {
@@ -156,7 +187,36 @@ func quoteCaddy(value string) string {
 	return `"` + value + `"`
 }
 
+// unquoteCaddy 是 quoteCaddy 的逆操作：去掉包裹引号并还原转义，
+// 用于从站点配置行中解析出原始目标值。
+func unquoteCaddy(value string) string {
+	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, `\"`, `"`)
+		value = strings.ReplaceAll(value, `\\`, `\`)
+	}
+	return value
+}
+
+// remoteHost 从目标 URL 提取用于 header_up Host / tls_server_name 的裸主机名
+// （去掉端口与路径）。IPv6 地址保留方括号形式。
+func remoteHost(target string) string {
+	u, err := url.Parse(target)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		return "[" + host + "]"
+	}
+	return host
+}
+
 func detectSite(data string) SiteKind {
+	headerUpHostRE := regexp.MustCompile(`(?m)^\s*header_up Host\s+(\S+)`)
 	switch {
 	case strings.Contains(data, "通用反代网关"):
 		return SiteGateway
@@ -164,8 +224,12 @@ func detectSite(data string) SiteKind {
 		return SiteStatic
 	case strings.Contains(data, "uri strip_prefix") && regexp.MustCompile(`(?m)^\s*@path_.* path `).MatchString(data):
 		return SitePath
+	case strings.Contains(data, "tls_server_name"):
+		return SiteRemote
 	case strings.Contains(data, "header_up Host {upstream_hostport}"):
 		return SiteEmby
+	case headerUpHostRE.MatchString(data):
+		return SiteRemote
 	case regexp.MustCompile(`(?m)^\s*reverse_proxy `).MatchString(data):
 		return SiteProxy
 	default:

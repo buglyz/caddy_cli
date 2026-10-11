@@ -137,6 +137,10 @@ c                    # 交互添加、修改、启停和删除
 c list
 c add app.example.com 3000
 c add app.example.com 3000 --path /api
+c add app.example.com 3000 --stream          # 生成 flush_interval -1（SSE/流式上游）
+c add app.example.com --target https://upstream.example.com --stream
+# --target：反代外部 HTTPS 上游。上游按 Host 路由时（Northflank *.code.run、
+# Cloudflare 等）自动生成 header_up Host 与 tls_server_name，无需手工改写
 c add-static static.example.com /var/www/site --spa
 c set app.example.com --port 4000
 c set-static static.example.com --root /var/www/new --spa
@@ -182,7 +186,9 @@ c reload                    # 同 c apply
 c cf status                 # Cloudflare DNS-01 配置管理（别名 c cloudflare）
 ```
 
-`rm` 别名 `del`/`delete`，`rm-emby` 别名 `del-emby`/`delete-emby`，`list-emby` 别名 `emby-list`，`add-emby` 别名 `emby`，`add-static` 别名 `static`，`add-gateway` 别名 `gateway`，`doctor` 别名 `check-env`，`snapshots` 别名 `snapshot`。完整列表见 `c help`。
+`rm` 别名 `del`/`delete`，`rm-emby` 别名 `del-emby`/`delete-emby`，`list-emby` 别名 `emby-list`，`add-emby` 别名 `emby`，`add-static` 别名 `static`，`add-gateway` 别名 `gateway`，`doctor` 别名 `check-env`，`snapshots` 别名 `snapshot`。完整列表见 `c help`。任何命令支持 `-h`/`--help` 查看该命令用法。
+
+`c validate` 在校验通过后还会对比 live Caddyfile 与 sites.d 渲染结果，不一致时给出警告（此时变更类命令会被拒绝，先执行 `c import --merge` 收编或 `c apply` 覆盖）。
 
 默认会检查域名 A/AAAA 是否指向本机。内网、测试或 Cloudflare 代理场景可显式使用：
 

@@ -146,7 +146,7 @@ func (a *App) toggleSite(args []string, enable bool) error {
 
 type setFlags struct {
 	query, port, path, root, target, allow string
-	scheme, spa                            *string
+	scheme, spa, stream                    *string
 	dnsTLS, open, allowSeen                bool
 	portSeen, pathSeen, rootSeen           bool
 	targetSeen                             bool
@@ -173,6 +173,12 @@ func parseSetFlags(args []string, command string) (setFlags, error) {
 		case "--no-spa":
 			v := "off"
 			result.spa = &v
+		case "--stream":
+			v := "on"
+			result.stream = &v
+		case "--no-stream":
+			v := "off"
+			result.stream = &v
 		case "--dns-only":
 			result.dnsTLS = true
 		case "--unsafe-open-proxy":
@@ -208,7 +214,7 @@ func parseSetFlags(args []string, command string) (setFlags, error) {
 }
 
 func (flags setFlags) hasChanges() bool {
-	return flags.scheme != nil || flags.spa != nil || flags.dnsTLS || flags.open || flags.allowSeen ||
+	return flags.scheme != nil || flags.spa != nil || flags.stream != nil || flags.dnsTLS || flags.open || flags.allowSeen ||
 		flags.portSeen || flags.pathSeen || flags.rootSeen || flags.targetSeen
 }
 
@@ -223,7 +229,9 @@ func optionsFromSite(site siteFile) (SiteOptions, error) {
 	}
 	reverseRE := regexp.MustCompile(`(?m)^\s*reverse_proxy\s+([^\s{]+)`)
 	if match := reverseRE.FindStringSubmatch(site.Data); len(match) > 1 {
-		opts.Target = match[1]
+		// 渲染时目标值经 quoteCaddy 包裹（如 "https://host"），解析需反转义，
+		// 否则 set 不带 --target 时会把带引号的值原样写回。
+		opts.Target = unquoteCaddy(match[1])
 		hostport := strings.TrimPrefix(strings.TrimPrefix(opts.Target, "http://"), "https://")
 		hostport = strings.Split(hostport, "/")[0]
 		if index := strings.LastIndex(hostport, ":"); index >= 0 {
@@ -241,6 +249,7 @@ func optionsFromSite(site siteFile) (SiteOptions, error) {
 		opts.Root = strings.ReplaceAll(strings.ReplaceAll(opts.Root, `\"`, `"`), `\\`, `\`)
 	}
 	opts.SPA = strings.Contains(site.Data, "try_files {path} /index.html")
+	opts.Stream = strings.Contains(site.Data, "flush_interval -1")
 	if site.Kind == SiteGateway {
 		if match := regexp.MustCompile(`(?m)^# 上游限制: 仅允许: (.+)$`).FindStringSubmatch(site.Data); len(match) > 1 {
 			opts.Allow, _ = parseGatewayAllow(strings.TrimSpace(match[1]))
@@ -307,6 +316,9 @@ func mergeSetFlags(opts SiteOptions, flags setFlags) (SiteOptions, error) {
 	}
 	if flags.spa != nil {
 		opts.SPA = *flags.spa == "on"
+	}
+	if flags.stream != nil {
+		opts.Stream = *flags.stream == "on"
 	}
 	if flags.allowSeen {
 		allow, err := parseGatewayAllow(flags.allow)

@@ -10,8 +10,11 @@ import (
 type addFlags struct {
 	positional                 []string
 	scheme, path, allow        string
+	target                     string
 	spa, dnsTLS, skipDNS, open bool
 	pathSeen, allowSeen        bool
+	targetSeen                 bool
+	stream                     bool
 }
 
 func parseAddFlags(args []string, command string) (addFlags, error) {
@@ -28,17 +31,22 @@ func parseAddFlags(args []string, command string) (addFlags, error) {
 			result.skipDNS = true
 		case "--spa":
 			result.spa = true
+		case "--stream":
+			result.stream = true
 		case "--unsafe-open-proxy":
 			result.open = true
-		case "--path", "--allow":
+		case "--path", "--allow", "--target":
 			if i+1 >= len(args) {
 				return result, fmt.Errorf("%s 需要参数", args[i])
 			}
 			i++
-			if args[i-1] == "--path" {
+			switch args[i-1] {
+			case "--path":
 				result.path, result.pathSeen = args[i], true
-			} else {
+			case "--allow":
 				result.allow, result.allowSeen = args[i], true
+			case "--target":
+				result.target, result.targetSeen = args[i], true
 			}
 		case "--":
 			result.positional = append(result.positional, args[i+1:]...)
@@ -73,7 +81,7 @@ func (a *App) preAdd(args []string, command string, arity int, usage string, val
 	if err != nil {
 		return res, err
 	}
-	if len(flags.positional) != arity {
+	if arity >= 0 && len(flags.positional) != arity {
 		return res, fmt.Errorf("%s", usage)
 	}
 	res.flags = flags
@@ -93,7 +101,8 @@ func (a *App) checkDNSIfNeeded(flags addFlags, label string) error {
 }
 
 func (a *App) addProxy(args []string) error {
-	pre, err := a.preAdd(args, "add", 2, "用法: c add <域名> <端口> [--path <前缀>]", validSiteLabel)
+	// arity 传 -1：add 有本机端口与 --target 两种模式，参数个数由下方自行校验。
+	pre, err := a.preAdd(args, "add", -1, "用法: c add <域名> <端口> [--path <前缀>] 或 c add <域名> --target <URL> [--stream]", validSiteLabel)
 	if err != nil {
 		return err
 	}
@@ -104,7 +113,32 @@ func (a *App) addProxy(args []string) error {
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
 	}
-	label, port := pre.label, flags.positional[1]
+	label := pre.label
+	if flags.targetSeen {
+		// 远程上游模式：c add <域名> --target <URL> [--stream]
+		if len(flags.positional) != 1 {
+			return fmt.Errorf("用法: c add <域名> --target <URL> [--stream]（--target 模式不接端口参数）")
+		}
+		target := strings.TrimSpace(flags.target)
+		if !strings.Contains(target, "://") {
+			target = flags.scheme + "://" + target
+		}
+		if !validProxyTarget(target) {
+			return fmt.Errorf("目标地址不合法")
+		}
+		if u, _ := url.Parse(target); u != nil && isPrivateHost(u.Host) {
+			fmt.Fprintf(a.Err, "警告: 目标 %s 是内网/保留地址，请确保配置可信\n", target)
+		}
+		if err := a.checkDNSIfNeeded(flags, label); err != nil {
+			return err
+		}
+		return a.createSite(label, SiteRemote, SiteOptions{Label: label, Target: target, Scheme: flags.scheme, DNSTLS: flags.dnsTLS, Stream: flags.stream})
+	}
+	// 本机端口模式：c add <域名> <端口> [--path <前缀>] [--stream]
+	if len(flags.positional) != 2 {
+		return fmt.Errorf("用法: c add <域名> <端口> [--path <前缀>] 或 c add <域名> --target <URL>")
+	}
+	port := flags.positional[1]
 	if !validPort(port) {
 		return fmt.Errorf("端口不合法")
 	}
@@ -114,17 +148,15 @@ func (a *App) addProxy(args []string) error {
 		if !validPathPrefix(flags.path) {
 			return fmt.Errorf("路径前缀不合法，请使用类似 /api 的形式")
 		}
-		kind = SitePath
-	}
-	if !flags.skipDNS {
-		if err := a.checkDNS(label); err != nil {
-			return err
+		if flags.stream {
+			return fmt.Errorf("路径反代不支持 --stream")
 		}
+		kind = SitePath
 	}
 	if err := a.checkDNSIfNeeded(flags, label); err != nil {
 		return err
 	}
-	return a.createSite(label, kind, SiteOptions{Label: label, Port: port, Path: flags.path, Scheme: flags.scheme, DNSTLS: flags.dnsTLS})
+	return a.createSite(label, kind, SiteOptions{Label: label, Port: port, Path: flags.path, Scheme: flags.scheme, DNSTLS: flags.dnsTLS, Stream: flags.stream})
 }
 
 func (a *App) addStatic(args []string) error {
@@ -133,8 +165,8 @@ func (a *App) addStatic(args []string) error {
 		return err
 	}
 	flags := pre.flags
-	if flags.pathSeen || flags.allowSeen || flags.open {
-		return fmt.Errorf("add-static 不支持 --path、--allow 或 --unsafe-open-proxy")
+	if flags.pathSeen || flags.allowSeen || flags.open || flags.stream {
+		return fmt.Errorf("add-static 不支持 --path、--allow、--unsafe-open-proxy 或 --stream")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
@@ -155,8 +187,8 @@ func (a *App) addEmby(args []string) error {
 		return err
 	}
 	flags := pre.flags
-	if flags.pathSeen || flags.spa || flags.allowSeen || flags.open {
-		return fmt.Errorf("add-emby 不支持 --path、--spa、--allow 或 --unsafe-open-proxy")
+	if flags.pathSeen || flags.spa || flags.allowSeen || flags.open || flags.stream {
+		return fmt.Errorf("add-emby 不支持 --path、--spa、--allow、--unsafe-open-proxy 或 --stream（Emby 反代默认开启流式）")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err
@@ -172,11 +204,6 @@ func (a *App) addEmby(args []string) error {
 	if u != nil && isPrivateHost(u.Host) {
 		fmt.Fprintf(a.Err, "警告: 目标 %s 是内网/保留地址，请确保配置可信\n", target)
 	}
-	if !flags.skipDNS {
-		if err := a.checkDNS(label); err != nil {
-			return err
-		}
-	}
 	if err := a.checkDNSIfNeeded(flags, label); err != nil {
 		return err
 	}
@@ -189,8 +216,8 @@ func (a *App) addGateway(args []string) error {
 		return err
 	}
 	flags := pre.flags
-	if flags.pathSeen || flags.spa {
-		return fmt.Errorf("add-gateway 不支持 --path 或 --spa")
+	if flags.pathSeen || flags.spa || flags.stream {
+		return fmt.Errorf("add-gateway 不支持 --path、--spa 或 --stream")
 	}
 	if err := a.validateDNSFlag(flags.dnsTLS); err != nil {
 		return err

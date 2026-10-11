@@ -33,6 +33,14 @@ func (a *App) Run(args []string) error {
 	if !knownCommand(cmd) {
 		return fmt.Errorf("未知命令: %s", cmd)
 	}
+	if isHelpFlag(args) {
+		if usage, ok := commandUsage(cmd); ok {
+			fmt.Fprintln(a.Out, usage)
+		} else {
+			a.help()
+		}
+		return nil
+	}
 	if noArgCommand(cmd) && len(args) > 0 {
 		return fmt.Errorf("用法: c %s", cmd)
 	}
@@ -136,6 +144,11 @@ func (a *App) Run(args []string) error {
 			return err
 		}
 		fmt.Fprintln(a.Out, "配置校验通过")
+		if err := a.assertManaged(); err != nil {
+			fmt.Fprintf(a.Out, "警告: %v\n", err)
+		} else {
+			fmt.Fprintln(a.Out, "live Caddyfile 与 sites.d/globals.d 渲染一致")
+		}
 		return nil
 	case "apply", "reload":
 		return a.mutate("apply", a.apply)

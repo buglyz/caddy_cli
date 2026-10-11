@@ -20,6 +20,8 @@ func (a *App) setSite(args []string) error {
 		return a.updateSite(site, flags, SiteStatic)
 	case SiteEmby:
 		return a.updateSite(site, flags, SiteEmby)
+	case SiteRemote:
+		return a.updateSite(site, flags, SiteRemote)
 	case SiteGateway:
 		return fmt.Errorf("该配置是通用反代网关，请使用 c set-gateway")
 	case SiteProxy, SitePath:
@@ -111,6 +113,9 @@ func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
 	if kind == SiteEmby && !validProxyTarget(opts.Target) {
 		return fmt.Errorf("无法解析 Emby 目标")
 	}
+	if kind == SiteRemote && !validProxyTarget(opts.Target) {
+		return fmt.Errorf("无法解析远程目标地址，请手工检查站点文件")
+	}
 	if kind == SiteGateway && len(opts.Allow) == 0 && !opts.UnsafeGateway {
 		return fmt.Errorf("网关必须配置 allow-list 或显式开放代理")
 	}
@@ -119,7 +124,7 @@ func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
 		return err
 	}
 	extras := extractCustomDirectives(site.Data)
-	if kind == SiteEmby || kind == SiteGateway {
+	if kind == SiteEmby || kind == SiteGateway || kind == SiteRemote {
 		extras = whitelistCustomDirectives(extras)
 	}
 	if strings.TrimSpace(extras) != "" {
@@ -135,20 +140,28 @@ func (a *App) updateSite(site siteFile, flags setFlags, kind SiteKind) error {
 
 func validateSetFlags(flags setFlags, kind SiteKind) error {
 	switch kind {
-	case SiteProxy, SitePath:
+	case SiteProxy:
 		if flags.rootSeen || flags.targetSeen || flags.spa != nil || flags.allowSeen || flags.open {
-			return fmt.Errorf("反代站点仅支持 --port、--path、--http、--https 和 --dns-only")
+			return fmt.Errorf("反代站点仅支持 --port、--stream、--http、--https 和 --dns-only")
+		}
+	case SitePath:
+		if flags.rootSeen || flags.targetSeen || flags.spa != nil || flags.allowSeen || flags.open || flags.stream != nil {
+			return fmt.Errorf("路径反代仅支持 --port、--path、--http、--https 和 --dns-only")
+		}
+	case SiteRemote:
+		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.spa != nil || flags.allowSeen || flags.open {
+			return fmt.Errorf("远程反代仅支持 --target、--stream、--no-stream、--http、--https 和 --dns-only")
 		}
 	case SiteStatic:
-		if flags.portSeen || flags.pathSeen || flags.targetSeen || flags.allowSeen || flags.open {
+		if flags.portSeen || flags.pathSeen || flags.targetSeen || flags.allowSeen || flags.open || flags.stream != nil {
 			return fmt.Errorf("静态站点仅支持 --root、--spa、--no-spa、--http、--https 和 --dns-only")
 		}
 	case SiteEmby:
-		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.spa != nil || flags.allowSeen || flags.open {
-			return fmt.Errorf("Emby 站点仅支持 --target、--http、--https 和 --dns-only")
+		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.spa != nil || flags.allowSeen || flags.open || flags.stream != nil {
+			return fmt.Errorf("Emby 站点仅支持 --target、--http、--https 和 --dns-only（流式默认开启）")
 		}
 	case SiteGateway:
-		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.targetSeen || flags.spa != nil {
+		if flags.portSeen || flags.pathSeen || flags.rootSeen || flags.targetSeen || flags.spa != nil || flags.stream != nil {
 			return fmt.Errorf("网关仅支持 --allow、--unsafe-open-proxy、--http、--https 和 --dns-only")
 		}
 	}
