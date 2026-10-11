@@ -1,6 +1,8 @@
 package caddyctl
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -99,5 +101,59 @@ func TestSplitCaddyBlocksCRLF(t *testing.T) {
 	}
 	if strings.Contains(blocks[0].Text, "\r") {
 		t.Fatalf("CR not normalized: %+v", blocks[0])
+	}
+}
+
+// TestSlugHeaderStripsScheme 回归：带 scheme 的站点头（如 https://auto.fleey.de）
+// 必须与已有裸域名 conf 命中同一文件名，否则 merge 生成重复站点导致
+// ambiguous site definition。
+func TestSlugHeaderStripsScheme(t *testing.T) {
+	cases := map[string]string{
+		"https://auto.fleey.de": "auto.fleey.de",
+		"http://a.example.com":  "a.example.com",
+		"app.example.com":       "app.example.com",
+	}
+	for header, want := range cases {
+		if got := slugHeader(header); got != want {
+			t.Errorf("slugHeader(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
+// TestImportAcceptsRenderedEmail 回归：renderManaged 输出的 email 带 quoteCaddy
+// 引号，import 必须反转义，否则 caddyctl config 的输出无法被 import --merge 回吃。
+func TestImportAcceptsRenderedEmail(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	source := filepath.Join(app.Paths.Root, "rendered.Caddyfile")
+	content := "# managed by caddyctl\n\n{\n    email \"admin@example.com\"\n}\n\napp.example.com {\n    reverse_proxy 127.0.0.1:3000\n}\n"
+	if err := os.WriteFile(source, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.importCommand([]string{"--force", source}); err != nil {
+		t.Fatalf("import rendered config: %v", err)
+	}
+	if app.State.Email != "admin@example.com" {
+		t.Errorf("email = %q, want admin@example.com", app.State.Email)
+	}
+}
+
+// TestImportMergePreservesBlockComments 锁定行为：import 回吃 caddyctl config
+// 输出时，站点块前的注释（如网关说明）必须跟随块写回 sites.d conf。
+func TestImportMergePreservesBlockComments(t *testing.T) {
+	app, _, _ := newTestApp(t, "")
+	source := filepath.Join(app.Paths.Root, "comments.Caddyfile")
+	content := "{\n    email admin@example.com\n}\n\n# gateway 说明注释\nauto.example.com {\n    @m path_regexp up ^/https:/*([A-Za-z0-9.\\-_]+)(/.*)\n    handle @m {\n        reverse_proxy 127.0.0.1:8998\n    }\n}\n"
+	if err := os.WriteFile(source, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.importCommand([]string{"--force", source}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(app.Paths.Sites, "auto.example.com.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# gateway 说明注释") {
+		t.Errorf("block comment lost after import:\n%s", data)
 	}
 }

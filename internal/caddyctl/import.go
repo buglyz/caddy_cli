@@ -67,15 +67,27 @@ func splitCaddyBlocks(text string) ([]caddyBlock, error) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var result []caddyBlock
 	var current, currentCode []string
+	// 块前注释行暂存，附着到下一个站点块，保证 import 回吃 config 输出时
+	// 站点说明（如网关注释）不丢失；全局块前的注释由渲染器统一生成，直接丢弃。
+	var pending []string
 	var lexer caddyLexer
 	depth, started := 0, false
 	for _, line := range lines {
 		clean := lexer.code(line)
 		if !started && strings.TrimSpace(clean) == "" {
+			if strings.TrimSpace(line) != "" {
+				pending = append(pending, line)
+			}
 			continue
 		}
 		if !started {
 			started = true
+			if strings.HasPrefix(strings.TrimSpace(clean), "{") {
+				pending = nil
+			} else {
+				current = append(current, pending...)
+			}
+			pending = nil
 		}
 		current = append(current, line)
 		currentCode = append(currentCode, clean)
@@ -168,7 +180,9 @@ func (a *App) applyImportedBlocks(blocks []caddyBlock, merge bool) error {
 			for _, line := range body {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "email ") {
-					email = strings.TrimSpace(strings.TrimPrefix(trimmed, "email "))
+					// renderManaged 用 quoteCaddy 包裹 email，导入需反转义，
+					// 否则 caddyctl config 的输出无法被 import 回吃。
+					email = unquoteCaddy(strings.TrimSpace(strings.TrimPrefix(trimmed, "email ")))
 					continue
 				}
 				globalLines = append(globalLines, strings.TrimPrefix(line, "    "))
@@ -271,6 +285,9 @@ var importSlugRE = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 func slugHeader(header string) string {
 	header = strings.TrimSpace(strings.Split(header, "{")[0])
+	// 剥离 scheme 前缀，保证 https://auto.fleey.de 与已存在的 auto.fleey.de.conf
+	// 命中同一个文件，否则 merge 时会生成第二个站点文件导致 ambiguous definition。
+	header = strings.TrimPrefix(strings.TrimPrefix(header, "https://"), "http://")
 	header = strings.ReplaceAll(header, ",", "_")
 	header = strings.Trim(importSlugRE.ReplaceAllString(header, "_"), "_")
 	if header == "" {

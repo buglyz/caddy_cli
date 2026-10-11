@@ -129,7 +129,7 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 		if opts.Stream {
 			stream = "        flush_interval -1\n"
 		}
-		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s {\n        header_up Host %s\n%s    }\n%s}\n", label, tls, quoteCaddy(opts.Target), host, stream, transport.String()), nil
+		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s {\n        header_up Host %s\n%s%s    }\n}\n", label, tls, quoteCaddy(opts.Target), host, stream, transport.String()), nil
 	case SiteStatic:
 		spa := ""
 		if opts.SPA {
@@ -218,7 +218,8 @@ func remoteHost(target string) string {
 func detectSite(data string) SiteKind {
 	headerUpHostRE := regexp.MustCompile(`(?m)^\s*header_up Host\s+(\S+)`)
 	switch {
-	case strings.Contains(data, "通用反代网关"):
+	// 注释可能被 import 重写丢弃，网关同时按内容特征（path_regexp 动态回源匹配器）识别。
+	case strings.Contains(data, "通用反代网关") || strings.Contains(data, "path_regexp"):
 		return SiteGateway
 	case regexp.MustCompile(`(?m)^\s*file_server(?:\s|$)`).MatchString(data):
 		return SiteStatic

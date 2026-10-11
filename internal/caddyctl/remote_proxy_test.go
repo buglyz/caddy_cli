@@ -24,6 +24,34 @@ func runErr(t *testing.T, app *App, want string, args ...string) {
 	}
 }
 
+func TestAddRemoteTargetExactShape(t *testing.T) {
+	// 精确锁定模板形状：transport 必须位于 reverse_proxy 块内部，
+	// 防止再出现闭合括号位置错误导致 caddy validate 报 unrecognized directive。
+	app, _, _ := newTestApp(t, "")
+	runOK(t, app, "add", "app.example.com", "--target", "https://upstream.example.com", "--stream", "--skip-dns-check")
+	data := readSiteConf(t, app, "app.example.com")
+	want := `app.example.com {
+    encode zstd gzip
+    reverse_proxy "https://upstream.example.com" {
+        header_up Host upstream.example.com
+        flush_interval -1
+        transport http {
+            tls
+            tls_server_name upstream.example.com
+            dial_timeout 5s
+            response_header_timeout 300s
+            keepalive 30s
+            keepalive_idle_conns 100
+            keepalive_idle_conns_per_host 10
+        }
+    }
+}
+`
+	if data != want {
+		t.Errorf("remote conf shape mismatch:\n--- got ---\n%s\n--- want ---\n%s", data, want)
+	}
+}
+
 func TestAddRemoteTarget(t *testing.T) {
 	app, _, _ := newTestApp(t, "")
 	runOK(t, app, "add", "app.example.com", "--target", "https://upstream.example.com", "--skip-dns-check")
@@ -104,6 +132,11 @@ func TestDetectRemoteKind(t *testing.T) {
 	proxy := "app.example.com {\n    reverse_proxy 127.0.0.1:3000\n}"
 	if got := detectSite(proxy); got != SiteProxy {
 		t.Errorf("proxy detect = %q, want %q", got, SiteProxy)
+	}
+	// 网关注释被 import 丢弃后，仍按内容特征（path_regexp）识别
+	gatewayNoComment := "https://auto.example.com {\n    @httpsProxyWithPort path_regexp up_https_port ^/https:/*([A-Za-z0-9.\\-_]+):([0-9]+)(/.*)\n    handle @httpsProxyWithPort {\n        reverse_proxy 127.0.0.1:8998 {\n            flush_interval -1\n        }\n    }\n}"
+	if got := detectSite(gatewayNoComment); got != SiteGateway {
+		t.Errorf("gateway detect = %q, want %q", got, SiteGateway)
 	}
 }
 
