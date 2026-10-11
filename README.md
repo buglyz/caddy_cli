@@ -17,8 +17,7 @@
 - Cloudflare DNS-01 Token 与 per-site `--dns-only`
 - 环境诊断、证书检查、日志和本地上游健康检查
 - 经 SHA256 校验的 release 安装和原生自更新
-- 分层交互管理菜单，主菜单提供添加反向代理直达入口并支持连续添加；无参数或 `c menu` 均可进入
-- 直接运行缺少参数的 `add`、`set`、`rm`、`enable/disable`、`cert-check` 也会进入对应交互提示
+- 任何命令支持 `-h`/`--help` 查看单命令用法
 - 兼容 `c install`、`c install-self` 和安装后首次运行导入已有 Caddyfile
 - 严格的命令参数校验，不适用于当前站点类型的选项会直接报错
 
@@ -63,7 +62,7 @@ make build VERSION=dev
 sudo install -m 0755 bin/caddyctl /usr/local/bin/caddyctl
 sudo ln -sfn /usr/local/bin/caddyctl /usr/local/bin/c
 c version
-c                    # 进入交互管理菜单
+c                    # 无参数运行显示帮助
 ```
 
 从源码手动安装时，需要自行确保 Caddy 已包含 `dns.providers.cloudflare`，并写入版本标记：
@@ -133,7 +132,7 @@ sudo c validate
 
 ```bash
 # 站点
-c                    # 交互添加、修改、启停和删除
+c add app.example.com 3000   # 完整命令列表见 c help
 c list
 c add app.example.com 3000
 c add app.example.com 3000 --path /api

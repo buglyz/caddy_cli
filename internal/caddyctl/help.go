@@ -94,7 +94,6 @@ func (a *App) help() {
   c install-self
   c update [--latest|--ref <release-tag>] [--binary]
   c version
-  c menu
 
 说明:
   · 任何命令支持 -h/--help 查看该命令用法。
@@ -103,7 +102,7 @@ func (a *App) help() {
   · 所有命令均由 Go 原生实现；安装请使用 install-go.sh。
   · c update 和 --latest 默认更新到滚动版 go-latest；固定版本使用 --ref vX.Y.Z。
   · update --binary 额外调用 caddy upgrade --keep-backup；不会自动重启服务。
-  · 无参数或 menu 进入交互管理菜单；help、-h、--help 显示本帮助。
+  · 无参数运行显示本帮助；help、-h、--help 同。
   · install 调用同分支 install-go.sh；install-self 仅安装当前本机二进制。
   · 设置 CADDYCTL_ROOT 可在隔离目录测试，不会访问生产 /etc/caddy。
 `)

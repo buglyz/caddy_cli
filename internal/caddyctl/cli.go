@@ -22,13 +22,8 @@ func (a *App) Run(args []string) error {
 		if cmd == "menu" && len(args) > 0 {
 			return fmt.Errorf("用法: c menu")
 		}
-		if os.Geteuid() != 0 && a.Paths.Root == "" {
-			return fmt.Errorf("请用 root 或 sudo 运行，例如: sudo c")
-		}
-		if err := a.preparePendingImport(); err != nil {
-			fmt.Fprintf(a.Err, "警告: 首次自动导入失败: %v\n", err)
-		}
-		return a.interactiveMenu()
+		a.help()
+		return nil
 	}
 	if !knownCommand(cmd) {
 		return fmt.Errorf("未知命令: %s", cmd)
@@ -68,34 +63,32 @@ func (a *App) Run(args []string) error {
 		return a.listSites(true)
 	case "add":
 		if len(args) == 0 {
-			return a.interactiveAddCommand("proxy")
+			return a.usageLine("add")
 		}
 		return a.mutate("add", func() error { return a.addProxy(args) })
 	case "add-static", "static":
 		if len(args) == 0 {
-			return a.interactiveAddCommand("static")
+			return a.usageLine("add-static")
 		}
 		return a.mutate("add-static", func() error { return a.addStatic(args) })
 	case "add-emby", "emby":
 		if len(args) == 0 {
-			return a.interactiveAddCommand("emby")
+			return a.usageLine("add-emby")
 		}
 		return a.mutate("add-emby", func() error { return a.addEmby(args) })
 	case "add-gateway", "gateway":
 		if len(args) == 0 {
-			return a.interactiveAddCommand("gateway")
+			return a.usageLine("add-gateway")
 		}
 		return a.mutate("add-gateway", func() error { return a.addGateway(args) })
 	case "set", "set-static", "set-emby", "set-gateway":
-		var args2, err = a.resolveSetArgs(cmd, args)
-		if err != nil {
-			return err
+		if len(args) == 0 || strings.HasPrefix(args[0], "--") {
+			return a.usageLine(cmd)
 		}
-		args = args2
-		if len(args) > 1 {
-			return a.mutate(cmd, func() error { return a.setKind(args, cmd) })
+		if len(args) == 1 {
+			return fmt.Errorf("用法: c %s <域名> [参数]", cmd)
 		}
-		return nil
+		return a.mutate(cmd, func() error { return a.setKind(args, cmd) })
 	case "rm", "del", "delete":
 		if len(args) == 0 {
 			query, err := a.readRequiredInput("输入要删除的站点地址: ")
@@ -351,34 +344,12 @@ func (a *App) setKind(args []string, cmd string) error {
 	return fmt.Errorf("未知 set 命令: %s", cmd)
 }
 
-// setNoun 返回 set 系列命令对应的站点类型描述。
-func setNoun(cmd string) string {
-	switch cmd {
-	case "set-static":
-		return "静态站点地址"
-	case "set-emby":
-		return "Emby 站点地址"
-	case "set-gateway":
-		return "网关地址"
-	default:
-		return "站点地址"
+// usageLine 打印单命令用法；无专属用法时回退主帮助。
+func (a *App) usageLine(cmd string) error {
+	if usage, ok := commandUsage(cmd); ok {
+		fmt.Fprintln(a.Out, usage)
+	} else {
+		a.help()
 	}
-}
-
-// resolveSetArgs 统一处理 set 系列的「无参→交互、-- 前缀→补 query、单参→交互」逻辑。
-func (a *App) resolveSetArgs(cmd string, args []string) ([]string, error) {
-	if len(args) == 0 {
-		return args, a.interactiveSetCommand(cmd, "")
-	}
-	if strings.HasPrefix(args[0], "--") {
-		query, err := a.readRequiredInput("输入要编辑的" + setNoun(cmd) + ": ")
-		if err != nil {
-			return nil, err
-		}
-		return append([]string{query}, args...), nil
-	}
-	if len(args) == 1 {
-		return args, a.interactiveSetCommand(cmd, args[0])
-	}
-	return args, nil
+	return nil
 }

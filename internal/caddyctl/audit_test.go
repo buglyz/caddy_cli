@@ -6,16 +6,14 @@ import (
 	"testing"
 )
 
-func TestDirectInteractiveCommandsRejectUnexpectedEOF(t *testing.T) {
-	app, _, _ := newTestApp(t, "")
-	if err := app.Run([]string{"add"}); err == nil || !strings.Contains(err.Error(), "交互输入") {
-		t.Fatalf("interactive add EOF error=%v", err)
+func TestCommandsWithoutArgumentsShowUsage(t *testing.T) {
+	app, out, _ := newTestApp(t, "")
+	runOK(t, app, "add")
+	if !strings.Contains(out.String(), "用法: c add") {
+		t.Fatalf("add without args should print usage: %s", out.String())
 	}
-
-	app, _, _ = newTestApp(t, "")
-	runOK(t, app, "add", "proxy.example.com", "3000", "--skip-dns-check")
-	if err := app.Run([]string{"set", "proxy.example.com"}); err == nil || !strings.Contains(err.Error(), "交互输入") {
-		t.Fatalf("interactive set EOF error=%v", err)
+	if err := app.Run([]string{"set", "proxy.example.com"}); err == nil || !strings.Contains(err.Error(), "用法") {
+		t.Fatalf("set with domain only should print usage error: %v", err)
 	}
 }
 
@@ -26,10 +24,6 @@ func TestCommandsWithoutArgumentsRejectTrailingValues(t *testing.T) {
 		if err := app.Run([]string{command, "unexpected"}); err == nil || !strings.Contains(err.Error(), "用法") {
 			t.Errorf("%s accepted a trailing argument: %v", command, err)
 		}
-	}
-	app, _, _ := newTestApp(t, "")
-	if err := app.Run([]string{"menu", "unexpected"}); err == nil {
-		t.Fatal("menu accepted a trailing argument")
 	}
 }
 
