@@ -239,7 +239,8 @@ func optionsFromSite(site siteFile) (SiteOptions, error) {
 		}
 	}
 	if match := regexp.MustCompile(`(?m)^\s*uri strip_prefix\s+(\S+)`).FindStringSubmatch(site.Data); len(match) > 1 {
-		opts.Path = match[1]
+		// 渲染时路径经 quoteCaddy 包裹，解析需反转义（与 Target 同理）。
+		opts.Path = unquoteCaddy(match[1])
 	}
 	if match := regexp.MustCompile(`(?m)^\s*root \*\s+(?:"((?:\\.|[^"])*)"|(\S+))`).FindStringSubmatch(site.Data); len(match) > 2 {
 		opts.Root = match[1]

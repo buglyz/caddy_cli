@@ -94,11 +94,11 @@ func renderSite(opts SiteOptions, kind SiteKind) (string, error) {
 		if opts.Scheme == "http" {
 			target = "http://" + target
 		}
-		stream := ""
 		if opts.Stream {
-			stream = "    flush_interval -1\n"
+			// flush_interval 是 reverse_proxy 的子指令，必须位于其块内。
+			return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s {\n        flush_interval -1\n    }\n}\n", label, tls, target), nil
 		}
-		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s%s    reverse_proxy %s\n}\n", label, tls, stream, target), nil
+		return fmt.Sprintf("%s {\n    encode zstd gzip\n%s    reverse_proxy %s\n}\n", label, tls, target), nil
 	case SitePath:
 		matcher := "@path_" + sanitizeName(primaryLabel(opts.Label)) + "_" + sanitizeName(opts.Path)
 		target := "127.0.0.1:" + opts.Port

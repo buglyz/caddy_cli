@@ -52,8 +52,17 @@ jobs:
           export CADDYCTL_SKIP_DNS_CHECK=1
           export CADDYCTL_NO_RELOAD=1
           /tmp/caddyctl-amd64 add app.example.com 3000
+          /tmp/caddyctl-amd64 add app2.example.com 3001 --stream
           /tmp/caddyctl-amd64 add-static static.example.com "/srv/site with spaces" --spa
           /tmp/caddyctl-amd64 add-emby emby.example.com https://10.0.0.5:8096
+          /tmp/caddyctl-amd64 add remote.example.com --target https://up.example.com --stream
+          grep -q 'tls_server_name up.example.com' "$root/etc/caddy/sites.d/remote.example.com.conf"
+          grep -q 'flush_interval -1' "$root/etc/caddy/sites.d/remote.example.com.conf"
+          /tmp/caddyctl-amd64 set remote.example.com --no-stream
+          if grep -q 'flush_interval' "$root/etc/caddy/sites.d/remote.example.com.conf"; then
+            echo "set --no-stream did not remove flush_interval" >&2
+            exit 1
+          fi
           /tmp/caddyctl-amd64 add-gateway gate.example.com --allow emby.example.com:443
           /tmp/caddyctl-amd64 validate
           caddy validate --config "$root/etc/caddy/Caddyfile" --adapter caddyfile
