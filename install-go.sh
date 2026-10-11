@@ -354,6 +354,19 @@ install_cli() {
     ln -sfn "$CLI_BIN" "$CLI_ALIAS"
 }
 
+# skill 手册内嵌于二进制，随安装写入配置目录，与已装版本行为保持一致。
+install_skill_doc() {
+    [[ -x "$CLI_BIN" ]] || return 0
+    install -d -m 0755 "$CONFIG_DIR/skill"
+    if "$CLI_BIN" skill > "${CONFIG_DIR}/skill/SKILL.md.new" 2>/dev/null; then
+        mv -f "${CONFIG_DIR}/skill/SKILL.md.new" "${CONFIG_DIR}/skill/SKILL.md"
+        log "Installed CLI skill doc: ${CONFIG_DIR}/skill/SKILL.md"
+    else
+        rm -f "${CONFIG_DIR}/skill/SKILL.md.new"
+        log "Warning: could not write the skill doc."
+    fi
+}
+
 initialize_fresh_config() {
     local managed
     (( CADDY_INSTALLED == 1 && PREEXISTING_CONFIG == 0 )) || return 0
@@ -403,6 +416,7 @@ main() {
     configure_service_environment
 
     install_cli "$binary"
+    install_skill_doc
     initialize_fresh_config
     restart_caddy_if_changed
 

@@ -103,6 +103,11 @@ func (a *App) selfInstallCommand(args []string) error {
 		return err
 	}
 	fmt.Fprintf(a.Out, "已安装本机 CLI: %s\n别名: %s -> %s\n", destination, alias, destination)
+	if target, err := a.skillInstall(); err != nil {
+		fmt.Fprintf(a.Err, "警告: 写入 skill 文档失败: %v\n", err)
+	} else {
+		fmt.Fprintf(a.Out, "skill 文档: %s\n", target)
+	}
 	return nil
 }
 

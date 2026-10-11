@@ -51,6 +51,7 @@ var commandUsageMap = map[string]string{
 	"install":      "用法: c install [--cloudflare]",
 	"install-self": "用法: c install-self",
 	"self-install": "用法: c install-self",
+	"skill":        "用法: c skill [install]",
 	"version":      "用法: c version",
 	"--version":    "用法: c version",
 	"help":         "用法: c help",
@@ -94,6 +95,7 @@ func (a *App) help() {
   c install-self
   c update [--latest|--ref <release-tag>] [--binary]
   c version
+  c skill [install]    # 打印/安装随二进制内置的 SKILL 手册（/etc/caddy/skill/SKILL.md）
 
 说明:
   · 任何命令支持 -h/--help 查看该命令用法。

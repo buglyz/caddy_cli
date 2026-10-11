@@ -120,6 +120,8 @@ jobs:
           test -x "$root/bin/caddyctl.bak"
           test -L "$root/bin/c"
           test -f "$root/etc/caddy/.caddyctl-pending-import"
+          test -f "$root/etc/caddy/skill/SKILL.md"
+          grep -q '# caddyctl' "$root/etc/caddy/skill/SKILL.md"
           find "$root/etc/caddy/backup" -path '*/pre-install-*/Caddyfile' -type f | grep -q .
           "$root/bin/caddyctl" --help >/dev/null
 

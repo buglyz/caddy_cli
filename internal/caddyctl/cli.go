@@ -39,7 +39,7 @@ func (a *App) Run(args []string) error {
 	if noArgCommand(cmd) && len(args) > 0 {
 		return fmt.Errorf("用法: c %s", cmd)
 	}
-	readOnly := readOnlyCommand(cmd, args) || cloudflareReadOnly(cmd, args)
+	readOnly := readOnlyCommand(cmd, args) || cloudflareReadOnly(cmd, args) || skillReadOnly(cmd, args)
 	if !readOnly && os.Geteuid() != 0 && a.Paths.Root == "" {
 		return fmt.Errorf("请用 root 或 sudo 运行，例如: sudo c")
 	}
@@ -197,6 +197,8 @@ func (a *App) Run(args []string) error {
 		return a.withLock(func() error { return a.selfInstallCommand(args) })
 	case "install":
 		return a.withLock(func() error { return a.installCommand(args) })
+	case "skill":
+		return a.skillCommand(args)
 	case "version", "--version":
 		fmt.Fprintln(a.Out, Version)
 		return nil
@@ -233,6 +235,11 @@ func cloudflareReadOnly(cmd string, args []string) bool {
 	return len(args) == 0 || args[0] == "" || args[0] == "status" || args[0] == "show" || args[0] == "check"
 }
 
+// skillReadOnly：`c skill`（打印内嵌手册）只读；`c skill install` 写文件需要 root。
+func skillReadOnly(cmd string, args []string) bool {
+	return cmd == "skill" && len(args) == 0
+}
+
 func readOnlyCommand(cmd string, args []string) bool {
 	switch cmd {
 	case "list", "ls", "list-emby", "emby-list", "status", "logs", "snapshots", "snapshot", "config", "cat", "validate", "check", "doctor", "check-env", "cert-check", "version", "--version":
@@ -253,7 +260,7 @@ func knownCommand(cmd string) bool {
 		"email", "timeout", "upstream-mode", "validate", "check", "apply", "reload",
 		"config", "cat", "snapshots", "snapshot", "undo", "start", "restart", "stop", "status", "logs",
 		"doctor", "check-env", "cert-check", "import", "cloudflare", "cf", "update",
-		"install", "install-self", "self-install", "version", "--version":
+		"install", "install-self", "self-install", "version", "--version", "skill":
 		return true
 	default:
 		return false
